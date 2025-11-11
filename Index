@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  
+  <title>経費精算システム</title>
+  <style>
+    /* 読み込み中オーバーレイ */
+    #loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.6);
+      z-index: 9998;
+      display: none; /* 初期状態は非表示 */
+      justify-content: center;
+      align-items: center;
+    }
+    #loading-spinner {
+      z-index: 9999;
+      color: white;
+      text-align: center;
+    }
+
+    /* ビューの切り替え */
+    .app-view {
+      display: none; /* すべてのビューを非表示 */
+    }
+    .app-view.active {
+      display: block; /* activeクラスを持つビューのみ表示 */
+    }
+
+    /* (v20: タイムシート関連スタイル 削除) */
+
+    /* 承認待ち一覧 (B) */
+    .report-list-item {
+      cursor: pointer;
+    }
+    .report-list-item:hover {
+      background-color: #f8f9fa;
+    }
+
+    /* 申請一覧 (E) */
+    #E-my-reports-list-body tr {
+      cursor: pointer;
+    }
+    
+    /* (v18) カスタムモーダルはローディングより手前に表示 */
+    .modal-backdrop {
+      z-index: 10000;
+    }
+    .modal {
+      z-index: 10001;
+    }
+    
+    /* (v21: 要件3-2) 上限超過時のスタイル */
+    .amount-over-limit {
+      background-color: #fff3cd; /* Bootstrap 'warning' light background */
+      border-color: #ffc107;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#"><i class="bi bi-wallet2"></i> 経費精算システム</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0" id="nav-links">
+     
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-view="view-A-expense-report">
+              <i class="bi bi-pencil-square"></i> 経費申請
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-view="view-E-my-reports">
+              <i class="bi bi-list-task"></i> 申請一覧
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-view="view-D-expense-summary">
+              <i class="bi bi-cash-coin"></i> 経費精算 (最終)
+            </a>
+          </li>
+          <? if (isManager) { ?>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-view="view-B-approval-list">
+              <i class="bi bi-check2-circle"></i> 承認待ち
+              <span class="badge bg-danger" id="approval-count-badge"></span>
+            </a>
+          </li>
+          <? } ?>
+        </ul>
+        <div class="navbar-text text-white">
+          <span id="user-info-display"></span> <i class="bi bi-person-circle"></i>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid p-3 p-md-4">
+
+    <div id="view-A-expense-report" class="app-view">
+      <h3 class="mb-3"><i class="bi bi-pencil-square"></i> 経費申請・編集</h3>
+
+      <div id="A-rejection-reason" class="alert alert-danger" style="display: none;"></div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <form id="report-header-form">
+            <input type="hidden" id="A-reportId">
+            
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label for="A-date" class="form-label">申請日 <span class="text-danger">*</span></label>
+                <input type="date" class="form-control" id="A-date" required>
+              </div>
+              <div class="col-md-5">
+                 <label for="A-title" class="form-label">件名 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="A-title" placeholder="例: 〇〇出張旅費精算" required>
+              </div>
+              <div class="col-md-4">
+                <label for="A-remarks" class="form-label">備考（全体）</label>
+                <input type="text" class="form-control" id="A-remarks" placeholder="特記事項など">
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span>経費明細</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="openExpenseModalA(null)">
+            <i class="bi bi-plus-lg"></i> 経費明細を追加
+          </button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover timesheet-table mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>利用日</th>
+                <th>経費項目</th>
+                <th>エリア</th> <th>金額 (円)</th>
+                <th>備考</th>
+                <th style="width: 120px;">領収書</th>
+                <th style="width: 80px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="A-expense-list-body">
+              <tr><td colspan="7" class="text-center p-4">「経費明細を追加」ボタンから項目を登録してください。</td></tr>
+            </tbody>
+            <tfoot class="table-group-divider">
+              <tr>
+                <td colspan="3" class="text-end fw-bold">合計金額</td>
+                <td class="fw-bold text-danger fs-5" id="A-total-expense-amount">0 円</td>
+                <td colspan="3"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-footer text-center">
+          <button type="button" class="btn btn-secondary" onclick="saveOrSubmitExpenseReportA('一時保存')">
+            <i class="bi bi-save"></i> 一時保存
+          </button>
+          <button type="button" class="btn btn-primary" onclick="saveOrSubmitExpenseReportA('申請中')">
+            <i class="bi bi-send-check"></i> 申請する
+          </button>
+          <button type="button" class="btn btn-outline-danger ms-3" onclick="resetFormA()">
+             <i class="bi bi-arrow-clockwise"></i> 入力リセット
+          </button>
+        </div>
+      </div>
+      
+    </div>
+
+    <div id="view-B-approval-list" class="app-view">
+      <h3 class="mb-3"><i class="bi bi-check2-circle"></i> 承認待ち一覧</h3>
+      <div class="card shadow-sm">
+        <div class="list-group list-group-flush" id="B-approval-list-body">
+          </div>
+      </div>
+    </div>
+
+    <div id="view-C-report-detail" class="app-view">
+      <h3 class="mb-3"><i class="bi bi-file-earmark-text"></i> 経費申請 詳細</h3>
+      
+      <button class="btn btn-outline-secondary mb-3" id="C-back-button">
+        <i class="bi bi-arrow-left"></i> 戻る
+      </button>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+           <h5 class="mb-0" id="C-header-date"></h5>
+          <span class="badge fs-6" id="C-header-status-badge"></span>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <strong>申請者:</strong> <span id="C-header-applicant"></span>
+            </div>
+            <div class="col-md-6">
+               <strong>申請日:</strong> <span id="C-header-apply-date"></span>
+            </div>
+            <div class="col-md-6">
+              <strong>件名:</strong> <span id="C-header-title"></span>
+            </div>
+            <div class="col-md-6">
+              <strong>合計経費:</strong> <span id="C-header-total-expense" class="text-danger fw-bold"></span> 円
+            </div>
+            
+            <div class="col-12 mt-2">
+              <strong>備考:</strong> <pre id="C-header-remarks" class="bg-light p-2 rounded mb-0"></pre>
+            </div>
+            
+            <div class="col-12 mt-2" id="C-rejection-reason-wrapper" style="display: none;">
+              <strong>差戻し理由:</strong>
+              <pre id="C-rejection-reason" class="bg-danger-subtle text-danger-emphasis p-2 rounded mb-0"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+       <div class="card shadow-sm mb-4">
+        <div class="card-header">経費明細</div>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead class="table-light">
+              <tr>
+                 <th>利用日</th>
+                <th>経費項目</th>
+                <th>エリア</th> <th>金額 (円)</th>
+                <th>備考</th>
+                <th>領収書</th>
+              </tr>
+            </thead>
+            <tbody id="C-expenses-body">
+              </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="C-approval-buttons" class="text-center" style="display: none;">
+        <input type="hidden" id="C-reportId">
+        <button class="btn btn-danger btn-lg" onclick="handleRejectC()">
+          <i class="bi bi-x-circle"></i> 差戻し
+        </button>
+        <button class="btn btn-success btn-lg ms-3" onclick="handleApproveC()">
+          <i class="bi bi-check-circle"></i> 承認する
+        </button>
+      </div>
+    </div>
+
+    <div id="view-D-expense-summary" class="app-view">
+      <h3 class="mb-3"><i class="bi bi-cash-coin"></i> 経費精算まとめ (最終申請)</h3>
+      
+      <div class="alert alert-info">
+        「承認済」ステータスで、まだ経費精算が申請されていない申請が表示されます。<br>
+        対象を選択し、「精算申請を送信」ボタンを押してください。経理担当者に通知が送信されます。
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center">
+             <span>精算対象一覧</span>
+            <button class="btn btn-sm btn-primary" onclick="submitFinalExpensesD()">
+              <i class="bi bi-send-check"></i> 選択した申請の精算申請を送信
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
