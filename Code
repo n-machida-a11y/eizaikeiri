@@ -1,0 +1,340 @@
+// -----------------------------------------------
+// グローバル変数 & 設定
+// -----------------------------------------------
+
+// (v21: スクリプトプロパティからIDを取得)
+// (v23: データ用とマスタ用を分離)
+var DATA_SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+var MASTER_SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('MASTER_SPREADSHEET_ID');
+
+
+// シート名 (v20: 日報機能を削除 / v21: マスタ追加)
+var SHEET_NAMES = {
+  SETTINGS: '設定',
+  EMPLOYEES: '社員マスタ',
+  EXPENSE_ITEMS: '経費項目マスタ',
+  REPORTS: '経費ヘッダー', 
+  EXPENSES: '経費明細',
+  
+  // (v21: 新規追加マスタ)
+  TRAVEL_RULES: '出張旅費規定マスタ',
+  AREA_MASTER: '宿泊費エリアマスタ',
+  POSITION_MASTER: '役職マスタ',
+  DEPARTMENT_MASTER: '部門マスタ',
+  JOB_TYPE_MASTER: '職種区分マスタ'
+};
+
+// -----------------------------------------------
+// メイン & 初期化
+// -----------------------------------------------
+
+/**
+ * WebアプリのGETリクエストハンドラ (v20: 修正 / v21: マスタ読み込み拡張 / v23: マスタ分離対応)
+ */
+function doGet(e) {
+  var ui = HtmlService.createTemplateFromFile('index.html');
+  // (v23: ssの即時オープンを削除)
+  
+  // 1. ユーザー情報 (v21: 拡張)
+  var userInfo = getUserInfo_();
+  
+  // 2. 経費項目マスタ (v23: ss引数を削除)
+  var expenseItems = getSheetData_(SHEET_NAMES.EXPENSE_ITEMS);
+  
+  // (v21: 新規マスタ読み込み / v23: ss引数を削除)
+  var travelRules = getSheetData_(SHEET_NAMES.TRAVEL_RULES);
+  var areaMaster = getSheetData_(SHEET_NAMES.AREA_MASTER);
+  var positionMaster = getSheetData_(SHEET_NAMES.POSITION_MASTER);
+  var departmentMaster = getSheetData_(SHEET_NAMES.DEPARTMENT_MASTER);
+  var jobTypeMaster = getSheetData_(SHEET_NAMES.JOB_TYPE_MASTER);
+  
+  // 3. テンプレートにデータを渡す
+  ui.employeeInfo = JSON.stringify(userInfo.employeeInfo); // ユーザー情報 (v21: 拡張された情報を含む)
+  ui.isManager = userInfo.isManager; // 管理者フラグ
+  ui.expenseItems = JSON.stringify(expenseItems); // 経費項目
+  
+  // (v21: 新規マスタを渡す)
+  ui.travelRules = JSON.stringify(travelRules);
+  ui.areaMaster = JSON.stringify(areaMaster);
+  ui.positionMaster = JSON.stringify(positionMaster);
+  ui.departmentMaster = JSON.stringify(departmentMaster);
+  ui.jobTypeMaster = JSON.stringify(jobTypeMaster);
+  
+  // 4. HTMLを生成
+  return ui.evaluate()
+    .setTitle('経費精算アプリ') // (v20: タイトル変更)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * ログインユーザーの情報を取得 (v2 / v21: 取得項目拡張 / v23: マスタ分離対応)
+ * @returns {object} { employeeInfo: { id, name, positionCode, deptCode, jobTypeCode ... }, isManager: boolean }
+ */
+function getUserInfo_() {
+  var email = Session.getActiveUser().getEmail();
+  
+  // (v23: ssの即時オープンを削除)
+  var data = getSheetData_(SHEET_NAMES.EMPLOYEES); // (v23: ss引数を削除)
+  
+  var userInfo = {
+    employeeInfo: {
+      id: null,
+      name: 'ゲスト',
+      email: email,
+      positionCode: null, // (v21: 役職コード)
+      deptCode: null, // (v21: 所属部門コード)
+      jobTypeCode: null // (v21: 職種区分コード)
+    },
+    isManager: false
+  };
+
+  for (var i = 0; i < data.length; i++) {
+    // (v21: キーを要件定義の「アドレス」に変更)
+    if (data[i]['アドレス'] === email) {
+      userInfo.employeeInfo.id = data[i]['社員番号'];
+      userInfo.employeeInfo.name = data[i]['社員名'];
+      
+      // (v21: 拡張項目を取得)
+      userInfo.employeeInfo.positionCode = data[i]['役職 (コード)'];
+      userInfo.employeeInfo.deptCode = data[i]['所属部門 (コード)'];
+      userInfo.employeeInfo.jobTypeCode = data[i]['職種区分 (コード)'];
+
+      // (v21: 役職名での判定を継続)
+      var positionName = data[i]['役職名']; 
+      if (positionName && (positionName.indexOf('部長') > -1 || positionName.indexOf('課長') > -1)) {
+        userInfo.isManager = true;
+      }
+      break;
+    }
+  }
+  return userInfo;
+}
+
+/**
+ * 設定シートをK-Vオブジェクトで取得 (キャッシュ対応) (v9 修正 / v23: データID使用)
+ * @returns {object} 設定の K-V
+ */
+function getSettings_() {
+  var cache = CacheService.getScriptCache();
+  var CACHE_KEY = 'SETTINGS_CACHE';
+  
+  var cached = cache.get(CACHE_KEY);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  var ss = SpreadsheetApp.openById(DATA_SPREADSHEET_ID); // (v23: データIDを使用)
+  var sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return {};
+  }
+  if (sheet.getLastColumn() < 2) {
+    return {}; 
+  }
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  
+  var settings = {};
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0]) { 
+      settings[data[i][0]] = data[i][1];
+    }
+  }
+  
+  cache.put(CACHE_KEY, JSON.stringify(settings), 21600);
+  return settings;
+}
+
+
+// -----------------------------------------------
+// (A) 経費精算入力 (v20: 大幅修正 / v21: 拡張)
+// -----------------------------------------------
+
+/**
+ * 経費精算の保存または申請 (v20: 日報機能を削除 / v21: areaCode追加, 日当重複チェック / v23: データID使用)
+ * @param {object} data { header, expenses }
+ * @param {string} status "一時保存" / "申請中"
+ * @returns {object} { status: "success", message: "..." }
+ */
+function saveOrSubmitExpenseReport(data, status) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000); 
+  
+  var ss = SpreadsheetApp.openById(DATA_SPREADSHEET_ID); // (v23: データIDを使用)
+  var userInfo = getUserInfo_();
+  
+  try {
+    var header = data.header;
+    var expenses = data.expenses;
+    var reportId = header.reportId;
+
+    if (!reportId) {
+      reportId = 'KEIHI-' + Utilities.getUuid(); 
+    }
+    
+    deleteReportData_(reportId, ss); 
+    
+    var totalExpenseAmount = 0;
+    var allowanceCount = 0; // (v21: 日当(101)のカウント用)
+
+    for (var k = 0; k < expenses.length; k++) {
+      totalExpenseAmount += parseFloat(expenses[k].amount || 0);
+      
+      // (v21: 要件2-4 日当(101)の重複チェック)
+      if (String(expenses[k].itemCode) === '101') {
+        allowanceCount++;
+      }
+    }
+
+    // (v21: 要件2-4 日当(101)が2件以上あればエラー)
+    if (allowanceCount > 1) {
+      throw new Error('日当(101)が複数登録されています。明細を確認してください。');
+    }
+
+    var headerRow = [
+      reportId, // 経費ID (A)
+      header.date, // 日付 (B) (yyyy-MM-dd)
+      userInfo.employeeInfo.name, // 申請者 (C)
+      header.title, // (v20 新規) 件名 (D)
+      header.remarks, // 備考 (E)
+      status, // 承認ステータス (F)
+      userInfo.employeeInfo.id, // 申請者社員番号 (G)
+      totalExpenseAmount, // 合計経費 (H)
+      (status === '申請中') ? new Date() : null, // 申請日 (I)
+      null // 差戻し理由 (J)
+    ];
+
+    var expensesRows = expenses.map(function(exp) {
+      var expenseId = exp.expenseId;
+      if (!expenseId || expenseId.startsWith('temp_')) {
+          expenseId = 'EXP-' + Utilities.getUuid();
+      }
+      return [
+        reportId, // 経費ID (A)
+        expenseId, // 明細ID (B)
+        exp.itemCode, // 経費項目コード (C)
+        exp.amount, // 金額 (D)
+        exp.receiptUrl, // 領収書URL (E)
+        exp.remarks, // 備考 (F)
+        exp.useDate, // 利用日 (G) (yyyy-MM-dd)
+        exp.areaCode || null // (v21: 要件2-3 エリアコード (H))
+      ];
+    });
+
+    if (headerRow.length > 0) {
+      ss.getSheetByName(SHEET_NAMES.REPORTS).appendRow(headerRow);
+    }
+    if (expensesRows.length > 0) {
+      var expSheet = ss.getSheetByName(SHEET_NAMES.EXPENSES);
+      expSheet.getRange(expSheet.getLastRow() + 1, 1, expensesRows.length, expensesRows[0].length)
+        .setValues(expensesRows);
+    }
+    
+    if (status === '申請中') {
+      var settings = getSettings_();
+      var approverEmail = settings.APPROVER_EMAIL_1;
+      if (approverEmail) {
+        MailApp.sendEmail({
+          to: approverEmail,
+          subject: '[経費精算] 承認依頼: ' + userInfo.employeeInfo.name + ' (' + header.date + ')',
+          body: userInfo.employeeInfo.name + ' さんから経費精算の承認依頼が届きました。\n\n' +
+                '日付: ' + header.date + '\n' +
+                '件名: ' + header.title + '\n' +
+                '合計経費: ' + totalExpenseAmount + ' 円\n' +
+                '備考: ' + header.remarks + '\n\n' +
+                'システムにログインして内容を確認・承認してください。\n' +
+                ScriptApp.getService().getUrl()
+        });
+      }
+    }
+
+    return { status: "success", message: status + "が完了しました。", reportId: reportId };
+  } catch (e) {
+    Logger.log('saveOrSubmitExpenseReport エラー: ' + e);
+    // (v21: エラーメッセージを具体的に返す)
+    return { status: "error", message: "保存/申請中にエラーが発生しました: " + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * (v22: 削除) AI-OCRによる画像処理 (processImageOCR)
+ */
+
+/**
+ * (v22: 新規) Base64画像をDriveにアップロードし、URLを返す
+ * @param {string} base64Image
+ * @returns {object} { status, url, message }
+*/
+function uploadBase64Image(base64Image) {
+  try {
+    // ▼▼▼ 修正箇所 ▼▼▼
+    // フォルダIDをコードに直接埋め込みます。
+    // "ここにあなたのフォルダID" の部分を、実際のフォルダID (例: "1aBCd_efgHIJk-lmnOPqrSTUvwxyz") に置き換えてください。
+    var folderId = "1VQgPXronOxngn40uiUVK2eRUPTWSWS4I"; 
+    // ▲▲▲ 修正箇所 ▲▲▲
+
+    // (不要になった設定シートの読み込みとチェックを削除)
+    // var settings = getSettings_();
+    // var folderId = settings.RECEIPT_FOLDER_ID;
+    // if (!folderId) {
+    //   throw new Error('設定シート (RECEIPT_FOLDER_ID) を確認してください。');
+    // }
+
+    // 1. 画像デコードとDrive保存
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(base64Image.split(',')[1]), 
+      'image/png', // PNG形式で固定
+      'receipt-' + new Date().getTime() + '.png'
+    );
+    var folder = DriveApp.getFolderById(folderId);
+    var file = folder.createFile(blob);
+    
+    // ★ 修正箇所: 組織外への共有 (ANYONE_WITH_LINK) がポリシーで拒否される場合、
+    // 組織内 (DOMAIN_WITH_LINK) での共有に変更します。
+    file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    var fileUrl = file.getUrl();
+    
+    return { 
+      status: "success", 
+      url: fileUrl 
+    };
+
+  } catch (e) {
+    Logger.log('uploadBase64Image エラー: ' + e);
+    return { status: "error", message: "画像アップロードエラー: " + e.message };
+  }
+}
+
+
+// -----------------------------------------------
+// (B) (C) 上長・閲覧用 (v20: 修正あり / v21: 拡張)
+// -----------------------------------------------
+
+/**
+ * (B) 承認待ちの申請一覧を取得 (v20: 修正 / v23: マスタ分離対応)
+ */
+function getPendingReports() {
+  // (v23: ssの即時オープンを削除)
+  var data = getSheetData_(SHEET_NAMES.REPORTS); // (v23: ss引数を削除)
+  
+  var pendingReports = data.filter(function(row) {
+    return row['承認ステータス'] === '申請中';
+  });
+  return pendingReports;
+}
+
+/**
+ * (C) 特定の申請の詳細データを取得 (v20: 修正 / v21: areaCode取得 / v23: マスタ分離対応)
+ */
+function getReportDetails(reportId) {
+  try {
+    if (!reportId) {
+      throw new Error('経費IDが指定されていません。');
+    }
+    
+    // (v23: ssの即時オープンを削除)
+    
+    var headerData = getShe
