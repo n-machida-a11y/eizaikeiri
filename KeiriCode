@@ -1,0 +1,1023 @@
+// -----------------------------------------------
+// ★★★ 設定必須 ★★★
+// -----------------------------------------------
+
+// 1. この経理用DB（スプレッドシート）のID (決定済)
+var KEIRI_DB_ID = '17WAK08P8zHyfwgbnsXR135XwabbuDGA2BWWu3q1VU70';
+
+// 2. 営業用DB（eigyoucode）のスプレッドシートID (固定値)
+var SALES_DB_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
+
+// 3. 一般用DB（Code.gs）の「データ用」スプレッドシートID
+//    (元の「Code.gs」のスクリプトプロパティ 'SPREADSHEET_ID' の値)
+var GENERAL_DATA_DB_ID = '15PGONpnqj6UDZa5076nXvKa2sUTg-_XFxHMDjBcgBFM'; 
+
+// 4. 一般用DB（Code.gs）の「マスタ用」スプレッドシートID
+//    (元の「Code.gs」のスクリプトプロパティ 'MASTER_SPREADSHEET_ID' の値)
+var GENERAL_MASTER_DB_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
+
+// 5. 経理担当者のアクセス判定に「使用する」社員マスタのID
+//    (例: GENERAL_MASTER_DB_ID と同じIDを指定)
+var ACCOUNTANT_CHECK_MASTER_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
+
+// 6. 経理担当者の判定基準（社員マスタ内の列名と値）
+// (vKeiri 修正) 一時的に全員に権限を付与するため、判定基準をコメントアウト
+// var ACCOUNTANT_CHECK_COLUMN_NAME = '所属部門 (コード)'; // 例: '役職名'
+// var ACCOUNTANT_CHECK_VALUE = '100'; // 例: '経理部'
+
+// -----------------------------------------------
+// シート名定義（元のファイルからコピー）
+// -----------------------------------------------
+
+// 営業用DB（eigyoucode）のシート名
+var SALES_SHEET_NAMES = {
+  HEADER: '日報',
+  ACTIVITIES: '行動明細',
+  EXPENSES: '経費明細',
+  EMPLOYEES: '社員マスタ', // 権限チェック用
+  EXPENSE_ITEMS: '経費項目マスタ', // 経費項目名マージ用
+  // ... 他のマスタ ...
+};
+
+// 一般用DB（Code.gs）のシート名
+var GENERAL_SHEET_NAMES = {
+  REPORTS: '経費ヘッダー', 
+  EXPENSES: '経費明細',
+  EMPLOYEES: '社員マスタ', // 権限チェック用
+  EXPENSE_ITEMS: '経費項目マスタ', // 経費項目名マージ用
+  // ... 他のマスタ ...
+};
+
+// (vKeiri 修正) 経理DBのシート名を日本語で定義
+// (vOmatome 修正) シート名は「振込」のまま、データのみ「支払」に変更
+var KEIRI_SHEET_NAMES = {
+  HEADERS: '振込対象ヘッダー', 
+  DETAILS: '振込対象明細'
+};
+
+// -----------------------------------------------
+// メイン & 権限チェック
+// -----------------------------------------------
+
+/**
+ * WebアプリのGETリクエストハンドラ
+ */
+function doGet(e) {
+  var ui = HtmlService.createTemplateFromFile('index.html');
+  var userInfo = getUserInfoAndAccess_();
+  
+  ui.userName = userInfo.name;
+  ui.isAccountant = userInfo.isAccountant;
+  
+  return ui.evaluate()
+    .setTitle('経理用 支払処理アプリ') // (vOmatome 修正) 用語変更
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * ログインユーザーの情報を取得し、経理担当者か判定する
+ * (vKeiri 修正) 経理以外もログインできるように、一時的に権限チェックを無効化
+ */
+function getUserInfoAndAccess_() {
+  var email = Session.getEffectiveUser().getEmail();
+  var name = 'ゲスト';
+  // var isAccountant = false; // (vKeiri 修正) 権限チェックを一時的に無効化
+
+  try {
+    if (!ACCOUNTANT_CHECK_MASTER_ID || ACCOUNTANT_CHECK_MASTER_ID.indexOf('!!!') > -1) {
+      // (vKeiri 修正) IDが未設定（または初期値のまま）でもエラーにせず、名前取得をスキップ
+       Logger.log('ACCOUNTANT_CHECK_MASTER_ID が未設定です。名前取得をスキップします。');
+       // (vKeiri 修正) 常に true を返してアクセス許可
+       return { name: name, email: email, isAccountant: true };
+    }
+    
+    var ss = SpreadsheetApp.openById(ACCOUNTANT_CHECK_MASTER_ID);
+    // 社員マスタのシート名は "社員マスタ" と仮定
+    var data = getSheetData_(ss.getSheetByName('社員マスタ')); 
+    
+    for (var i = 0; i < data.length; i++) {
+      // (I列)のアドレス という指定でしたが、堅牢性のため列名 'アドレス' で照合します
+      if (data[i]['アドレス'] === email) { 
+        name = data[i]['社員名'];
+        
+        // (vKeiri 修正) 判定基準に一致するかどうかのチェックを一時的にコメントアウト
+        // var checkValue = data[i][ACCOUNTANT_CHECK_COLUMN_NAME];
+        // if (checkValue && String(checkValue) === String(ACCOUNTANT_CHECK_VALUE)) {
+        //   isAccountant = true;
+        // }
+        break;
+      }
+    }
+  } catch (e) {
+    Logger.log('getUserInfoAndAccess_ Error: ' + e);
+  }
+  
+  // (vKeiri 修正) 経理担当者かどうかにかかわらず、常に true (アクセス許可) を返す
+  return { name: name, email: email, isAccountant: true };
+}
+
+/**
+ * 権限チェック（汎用）
+ */
+function checkAccess_() {
+  if (!getUserInfoAndAccess_().isAccountant) {
+    throw new Error('この操作を行う権限がありません。');
+  }
+  return getUserInfoAndAccess_(); // 念のため実行者情報も返す
+}
+
+// -----------------------------------------------
+// (C) 詳細データ取得 (経理DBから明細を読み込む)
+// -----------------------------------------------
+
+/**
+ * (クライアントから呼び出される)
+ * 経理DB（中央DB）から明細データを取得する
+ * @param {string} keiriShoriID - 経理処理ID
+ * @returns {object} { status: "success", details: Array }
+ */
+function getReportDetailsForKeiri(keiriShoriID) {
+  checkAccess_(); // 権限チェック
+
+  try {
+    var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
+    var sheet = ss.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
+
+    if (!sheet) {
+      throw new Error('経理DB (KEIRI_DB_ID) に "' + KEIRI_SHEET_NAMES.DETAILS + '" シートが見つかりません。');
+    }
+
+    var detailData = getSheetData_(sheet);
+    
+    // 該当する経理処理IDの明細のみフィルタリング
+    var filteredDetails = detailData.filter(function(row) {
+      // getSheetData_ は数値なども文字列として扱うため、明示的に String() で比較
+      return String(row['経理処理ID']) === String(keiriShoriID);
+    });
+    
+    return { status: "success", details: filteredDetails };
+
+  } catch (e) {
+    Logger.log('getReportDetailsForKeiri Error: ' + e);
+    return { status: "error", message: '明細データの取得エラー: ' + e.message };
+  }
+}
+
+
+// -----------------------------------------------
+// (A) メイン機能: データ同期
+// -----------------------------------------------
+
+/**
+ * (クライアントから呼び出される)
+ * 営業用DBと一般用DBから「精算申請済」のデータを同期（転記）する
+ * (vKeiri 修正) ステータス更新ロジックと重複防止ロジックを追加
+ */
+function syncDataFromSources() {
+  var userInfo = checkAccess_(); // 権限チェック
+  var totalNewSales = 0;
+  var totalNewGeneral = 0;
+  
+  // 経理DBの既存データを事前に取得し、重複をチェックするためのMapを作成
+  var keiriHeaders = loadPendingHeaders_Internal_(); // 経理DBのヘッダーをすべて取得
+  var keiriIdMap = {};
+  keiriHeaders.forEach(function(h) {
+      keiriIdMap[h['元申請ID']] = h;
+  });
+
+  try {
+    totalNewSales = syncFromSalesDB_(keiriIdMap);
+  } catch (e) {
+    Logger.log('syncDataFromSources (Sales) Error: ' + e);
+    // エラーが起きても続行
+  }
+  
+  try {
+    totalNewGeneral = syncFromGeneralDB_(keiriIdMap);
+  } catch (e) {
+    Logger.log('syncDataFromSources (General) Error: ' + e);
+  }
+  
+  return { 
+    status: "success", 
+    message: "同期が完了しました。\n営業用: " + totalNewSales + "件\n一般用: " + totalNewGeneral + "件",
+    totalNew: totalNewSales + totalNewGeneral
+  };
+}
+
+/**
+ * (内部) 営業用DB (eigyoucode) から同期
+ * (vKeiri 修正) 重複チェック用Mapとステータス更新ロジックを追加
+ * (vOmatome 修正) '最終ステータス' 列への書き込みを削除
+ */
+function syncFromSalesDB_(keiriIdMap) {
+  var ss = SpreadsheetApp.openById(SALES_DB_ID);
+  var headerSheet = ss.getSheetByName(SALES_SHEET_NAMES.HEADER);
+  
+  if (!headerSheet) {
+    Logger.log('Sales Sync Error: "' + SALES_SHEET_NAMES.HEADER + '" という名前のシートが見つかりません。');
+    return 0;
+  }
+  
+  var itemsMap = getExpenseItemMap_(ss, SALES_SHEET_NAMES.EXPENSE_ITEMS);
+
+  // ヘッダー行とデータの両方を取得
+  var range = headerSheet.getRange(1, 1, headerSheet.getLastRow(), headerSheet.getLastColumn());
+  var allValues = range.getValues();
+  if (allValues.length < 2) return 0; // ヘッダーのみ
+
+  var headers = allValues[0];
+  var statusColIdx = headers.indexOf('承認ステータス'); // 0-based
+  // (vOmatome 修正) '最終ステータス' への参照を削除
+  // var finalStatusColIdx = headers.indexOf('最終ステータス'); 
+  
+  if (statusColIdx === -1) { // (vOmatome 修正) 最終ステータスのチェックを削除
+    Logger.log('Sales Sync: 必要な列(承認ステータス)が見つかりません。');
+    return 0;
+  }
+  
+  var newCount = 0;
+  var keiriShoriID = '';
+  
+  // データをループ (1行目ヘッダーを除く)
+  for (var i = 1; i < allValues.length; i++) {
+    var row = allValues[i];
+    var status = row[statusColIdx];
+    var reportId = row[headers.indexOf('日報ID')];
+    var actualRow = i + 1; // 1-based row index for writing
+
+    // 転記対象の条件:
+    // 1. 元のステータスが「精算申請済」である
+    // 2. 経理DBに未登録 (または過去に差し戻しになっている行のステータスを更新)
+    if (status === '精算申請済') {
+      var existingKeiriData = keiriIdMap[reportId];
+
+      if (!existingKeiriData) {
+        // --- 1. 新規転記 ---
+        Logger.log('Sales Sync: [新規] ID: ' + reportId);
+        
+        try {
+            var details = getReportDetails_Sales_(reportId, ss, itemsMap);
+            keiriShoriID = 'PAY-' + Utilities.getUuid();
+            
+            // a. 経理DBへ転記 (ステータス="支払待ち") (vOmatome 修正)
+            transferToKeiriDB_(keiriShoriID, '営業用', reportId, details, '支払待ち');
+            
+            // b. 元DBのステータスを「経理転記済」に更新 (vOmatome 修正) -> 処理を削除
+            // headerSheet.getRange(actualRow, finalStatusColIdx + 1).setValue('経理転記済');
+            
+            newCount++;
+        } catch (e) {
+            Logger.log('Sales Sync (新規転記失敗): ID ' + reportId + ', Error: ' + e);
+        }
+      } else if (existingKeiriData['経理ステータス'] === '経理差戻し') {
+          // --- 2. 差し戻しからの再申請（既存データの上書き更新） ---
+          Logger.log('Sales Sync: [再申請] ID: ' + reportId + ' (既存データを更新)');
+          
+          // 既存のヘッダー行を見つけて更新するロジックが必要
+          try {
+              var details = getReportDetails_Sales_(reportId, ss, itemsMap);
+              // 既存行の明細は削除し、ヘッダー行のステータスと金額を更新する
+              // (vOmatome 修正) ステータスを「支払待ち」に
+              updateKeiriDB_OnResubmit_(existingKeiriData['経理処理ID'], '営業用', reportId, details, '支払待ち');
+              
+              // 元DBのステータスを「経理転記済」に更新 (vOmatome 修正) -> 処理を削除
+              // headerSheet.getRange(actualRow, finalStatusColIdx + 1).setValue('経理転記済');
+
+              newCount++;
+          } catch (e) {
+              Logger.log('Sales Sync (再申請更新失敗): ID ' + reportId + ', Error: ' + e);
+          }
+      }
+    }
+  }
+  return newCount;
+}
+
+/**
+ * (内部) 一般用DB (Code.gs) から同期
+ * (vKeiri 修正) 重複チェック用Mapとステータス更新ロジックを追加
+ * (vOmatome 修正) '最終ステータス' 列への書き込みを削除
+ */
+function syncFromGeneralDB_(keiriIdMap) {
+  var dataSs = SpreadsheetApp.openById(GENERAL_DATA_DB_ID);
+  var masterSs = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID);
+  
+  var headerSheet = dataSs.getSheetByName(GENERAL_SHEET_NAMES.REPORTS);
+  
+  if (!headerSheet) {
+    Logger.log('General Sync Error: "' + GENERAL_SHEET_NAMES.REPORTS + '" という名前のシートが見つかりません。');
+    return 0;
+  }
+  
+  var itemsMap = getExpenseItemMap_(masterSs, GENERAL_SHEET_NAMES.EXPENSE_ITEMS);
+
+  var range = headerSheet.getRange(1, 1, headerSheet.getLastRow(), headerSheet.getLastColumn());
+  var allValues = range.getValues();
+  if (allValues.length < 2) return 0; // ヘッダーのみ
+
+  var headers = allValues[0];
+  var statusColIdx = headers.indexOf('承認ステータス');
+  // (vOmatome 修正) '最終ステータス' への参照を削除
+  // var finalStatusColIdx = headers.indexOf('最終ステータス');
+  
+  if (statusColIdx === -1) { // (vOmatome 修正) 最終ステータスのチェックを削除
+    Logger.log('General Sync: 必要な列(承認ステータス)が見つかりません。');
+    return 0;
+  }
+  
+  var newCount = 0;
+  
+  // データをループ (1行目ヘッダーを除く)
+  for (var i = 1; i < allValues.length; i++) {
+    var row = allValues[i];
+    var status = row[statusColIdx];
+    var reportId = row[headers.indexOf('経費ID')];
+    var actualRow = i + 1; // 1-based row index for writing
+
+    if (status === '精算申請済') {
+      var existingKeiriData = keiriIdMap[reportId];
+
+      if (!existingKeiriData) {
+        // --- 1. 新規転記 ---
+        Logger.log('General Sync: [新規] ID: ' + reportId);
+        try {
+            var details = getReportDetails_General_(reportId, dataSs, itemsMap);
+            var keiriShoriID = 'PAY-' + Utilities.getUuid();
+            
+            // (vOmatome 修正) ステータスを「支払待ち」に
+            transferToKeiriDB_(keiriShoriID, '一般用', reportId, details, '支払待ち');
+            
+            // (vOmatome 修正) '最終ステータス' への書き込みを削除
+            // headerSheet.getRange(actualRow, finalStatusColIdx + 1).setValue('経理転記済');
+            
+            newCount++;
+        } catch (e) {
+            Logger.log('General Sync (新規転記失敗): ID ' + reportId + ', Error: ' + e);
+        }
+      } else if (existingKeiriData['経理ステータス'] === '経理差戻し') {
+          // --- 2. 差し戻しからの再申請（既存データの上書き更新） ---
+          Logger.log('General Sync: [再申請] ID: ' + reportId + ' (既存データを更新)');
+          try {
+              var details = getReportDetails_General_(reportId, dataSs, itemsMap);
+              
+              // (vOmatome 修正) ステータスを「支払待ち」に
+              updateKeiriDB_OnResubmit_(existingKeiriData['経理処理ID'], '一般用', reportId, details, '支払待ち');
+              
+              // (vOmatome 修正) '最終ステータス' への書き込みを削除
+              // headerSheet.getRange(actualRow, finalStatusColIdx + 1).setValue('経理転記済');
+              newCount++;
+          } catch (e) {
+              Logger.log('General Sync (再申請更新失敗): ID ' + reportId + ', Error: ' + e);
+          }
+      }
+    }
+  }
+  return newCount;
+}
+
+/**
+ * (内部) 経理DB（中央DB）へヘッダーと明細を書き込む (新規転記用)
+ * @param {string} keiriShoriID - 新規に生成された経理処理ID
+ * @param {string} systemType - 営業用 or 一般用
+ * @param {string} reportId - 元の申請ID
+ * @param {object} details - ヘッダーと経費明細のオブジェクト
+ * @param {string} keiriStatus - 初期ステータス (支払待ち)
+ */
+function transferToKeiriDB_(keiriShoriID, systemType, reportId, details, keiriStatus) {
+  var keiriSs = SpreadsheetApp.openById(KEIRI_DB_ID);
+  var keiriHeaderSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+  var keiriDetailSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
+  
+  if (!keiriHeaderSheet || !keiriDetailSheet) {
+    throw new Error('経理DB (KEIRI_DB_ID) に "' + KEIRI_SHEET_NAMES.HEADERS + '" または "' + KEIRI_SHEET_NAMES.DETAILS + '" シートが見つかりません。');
+  }
+  
+  var header = details.header;
+  var expenses = details.expenses;
+  
+  try {
+    // 1. 振込対象ヘッダー 行データを作成 (payment_headers.tsv の列順に合わせる)
+    // 経理処理ID, システム区分, 元申請ID, 申請日, 申請者ID, 申請者名, 件名, 合計金額, 経理ステータス, 処理日, 担当経理, 元シートURL
+    var headerRow = [
+      keiriShoriID,
+      systemType,
+      reportId,
+      header['申請日'] || new Date(),
+      header['申請者社員番号'] || header['申請者ID'], // (営業/一般)
+      header['担当者'] || header['申請者'], // (営業/一般)
+      (systemType === '営業用') ? (header['日付'] + " (" + (header['担当者'] || '') + ")") : (header['件名'] || header['日付']), // 件名
+      header['合計経費'] || header['合計金額'], // (営業/一般)
+      keiriStatus, // (vOmatome 修正) 支払待ち
+      null, // 処理日
+      null, // 担当経理
+      '' // 元シートURL
+    ];
+    keiriHeaderSheet.appendRow(headerRow);
+    
+    // 2. 振込対象明細 行データを作成 (payment_details.tsv の列順に合わせる)
+    // 経理処理ID, 元申請ID, 明細ID, 利用日, 経理項目コード, 経費項目名, 金額, 税抜金額, 消費税, エリアコード, 備考, 領収書URL
+    var detailRows = expenses.map(function(ex) {
+      var taxIncluded = parseFloat(ex.amount || ex['金額'] || 0); 
+      
+      return [
+        keiriShoriID,
+        reportId,
+        ex.expenseId || ex['明細ID'] || ex['経費ID'], 
+        ex.useDate || ex['利用日'],
+        ex.itemCode || ex['経費項目コード'],
+        ex.itemName,
+        taxIncluded, 
+        null, // 税抜金額 (不明)
+        null, // 消費税 (不明)
+        ex.areaCode || ex['エリアコード'] || null, 
+        ex.remarks || ex['備考'], 
+        ex.receiptUrl || ex['領収書URL']
+      ];
+    });
+    
+    if (detailRows.length > 0) {
+      keiriDetailSheet.getRange(keiriDetailSheet.getLastRow() + 1, 1, detailRows.length, detailRows[0].length)
+        .setValues(detailRows);
+    }
+    
+  } catch (e) {
+    Logger.log('transferToKeiriDB_ Error: ' + e);
+    throw new Error('経理DBへの転記中にエラーが発生しました: ' + e.message);
+  }
+}
+
+
+/**
+ * (内部) 差し戻しからの再申請時に既存の経理DBヘッダーを更新する
+ * (明細は削除し、ヘッダー行のステータスと金額を更新)
+ */
+function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, newStatus) {
+    var keiriSs = SpreadsheetApp.openById(KEIRI_DB_ID);
+    var keiriHeaderSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+    var keiriDetailSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
+    
+    if (!keiriHeaderSheet || !keiriDetailSheet) {
+      throw new Error('経理DB (KEIRI_DB_ID) に必要なシートが見つかりません。');
+    }
+
+    var header = details.header;
+    var expenses = details.expenses;
+    var totalAmount = header['合計経費'] || header['合計金額'] || 0;
+    
+    // 1. 既存のヘッダー行を見つけて、ステータス、金額、件名を更新
+    var headerData = keiriHeaderSheet.getDataRange().getValues();
+    var headers = headerData[0];
+    var idCol = headers.indexOf('経理処理ID');
+    var statusCol = headers.indexOf('経理ステータス');
+    var totalCol = headers.indexOf('合計金額');
+    var subjectCol = headers.indexOf('件名');
+    
+    for (var i = 1; i < headerData.length; i++) {
+        if (headerData[i][idCol] === keiriShoriID) {
+            var rowNum = i + 1;
+            // ステータスを「支払待ち」に戻す (vOmatome 修正)
+            keiriHeaderSheet.getRange(rowNum, statusCol + 1).setValue(newStatus);
+            // 金額を新しい申請の金額に更新
+            keiriHeaderSheet.getRange(rowNum, totalCol + 1).setValue(totalAmount);
+            // 件名を新しい日付で更新
+            var newSubject = (systemType === '営業用') ? (header['日付'] + " (" + (header['担当者'] || '') + ")") : (header['件名'] || header['日付']);
+            keiriHeaderSheet.getRange(rowNum, subjectCol + 1).setValue(newSubject);
+            
+            break;
+        }
+    }
+
+    // 2. 既存の明細をすべて削除
+    var detailData = keiriDetailSheet.getDataRange().getValues();
+    var detailHeaders = detailData[0];
+    var keiriIdCol = detailHeaders.indexOf('経理処理ID');
+    
+    var rowsToDelete = [];
+    for (var i = 1; i < detailData.length; i++) {
+        if (detailData[i][keiriIdCol] === keiriShoriID) {
+            rowsToDelete.push(i + 1); // 1-based index (行番号)
+        }
+    }
+    rowsToDelete.sort(function(a, b) { return b - a; });
+    
+    rowsToDelete.forEach(function(rowNum) {
+      keiriDetailSheet.deleteRow(rowNum);
+    });
+
+    // 3. 新しい明細を追加 (transferToKeiriDB_ の明細転記ロジックを流用)
+    var detailRows = expenses.map(function(ex) {
+        var taxIncluded = parseFloat(ex.amount || ex['金額'] || 0); 
+        return [
+            keiriShoriID,
+            reportId,
+            ex.expenseId || ex['明細ID'] || ex['経費ID'], 
+            ex.useDate || ex['利用日'],
+            ex.itemCode || ex['経費項目コード'],
+            ex.itemName,
+            taxIncluded, 
+            null, 
+            null, 
+            ex.areaCode || ex['エリアコード'] || null, 
+            ex.remarks || ex['備考'], 
+            ex.receiptUrl || ex['領収書URL']
+        ];
+    });
+    
+    if (detailRows.length > 0) {
+      keiriDetailSheet.getRange(keiriDetailSheet.getLastRow() + 1, 1, detailRows.length, detailRows[0].length)
+        .setValues(detailRows);
+    }
+}
+
+
+// -----------------------------------------------
+// (B) メイン機能: 経理処理
+// -----------------------------------------------
+
+/**
+ * (内部) 経理DBからすべてのヘッダーを取得
+ */
+function loadPendingHeaders_Internal_() {
+  var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
+  var sheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+  if (!sheet) return [];
+  return getSheetData_(sheet);
+}
+
+
+/**
+ * (クライアントから呼び出される)
+ * 経理DB（中央DB）から「支払待ち」のヘッダー一覧を取得する
+ * (vOmatome 修正) 用語変更
+ */
+function loadPendingHeaders() {
+  checkAccess_(); // 権限チェック
+  
+  try {
+    var data = loadPendingHeaders_Internal_();
+    
+    // 「支払待ち」のみフィルタリング (vOmatome 修正)
+    var pendingHeaders = data.filter(function(row) {
+      return row['経理ステータス'] === '支払待ち';
+    });
+    
+    return { status: "success", data: pendingHeaders };
+    
+  } catch (e) {
+    Logger.log('loadPendingHeaders Error: ' + e);
+    return { status: "error", message: '支払待ちデータの取得エラー: ' + e.message };
+  }
+}
+
+/**
+ * (クライアントから呼び出される)
+ * 選択された経理処理IDのステータスを「支払済」に更新する
+ * (vOmatome 修正) 用語変更
+ */
+function markAsProcessed(keiriShoriIDs, keiriTantouName) {
+  var userInfo = checkAccess_(); // 権限チェック
+  
+  if (!keiriShoriIDs || keiriShoriIDs.length === 0) {
+    return { status: "error", message: "処理対象が選択されていません。" };
+  }
+  
+  try {
+    var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
+    var sheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+    
+    if (!sheet) {
+      throw new Error('経理DB (KEIRI_DB_ID) に "' + KEIRI_SHEET_NAMES.HEADERS + '" シートが見つかりません。');
+    }
+    
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+    
+    // 列のインデックスを取得 (0-based)
+    var idColIdx = headers.indexOf('経理処理ID');
+    var statusColIdx = headers.indexOf('経理ステータス');
+    var processDateColIdx = headers.indexOf('処理日');
+    var accountantColIdx = headers.indexOf('担当経理');
+    // (vOmatome-2 修正) 参照する列を追加
+    var originalIdColIdx = headers.indexOf('元申請ID');
+    var systemTypeColIdx = headers.indexOf('システム区分');
+    
+    if (idColIdx === -1 || statusColIdx === -1 || processDateColIdx === -1 || accountantColIdx === -1 ||
+        originalIdColIdx === -1 || systemTypeColIdx === -1) { // (vOmatome-2 修正)
+      // (vOmatome 修正) シート名は「振込対象ヘッダー」のままなので、エラーメッセージは元のまま
+      throw new Error('振込対象ヘッダー シートの列名（経理処理ID, 経理ステータス, 処理日, 担当経理, 元申請ID, システム区分）が正しくありません。');
+    }
+    
+    var updatedCount = 0;
+    var today = new Date();
+    
+    // データをループ (1行目ヘッダーを除く)
+    for (var i = 1; i < data.length; i++) {
+      var rowId = data[i][idColIdx];
+      
+      if (keiriShoriIDs.indexOf(rowId) > -1) {
+        // IDが一致した
+        var rowNum = i + 1; // 実際の行番号
+        
+        // ステータス、処理日、担当経理をセット
+        sheet.getRange(rowNum, statusColIdx + 1).setValue('支払済'); // (vOmatome 修正)
+        sheet.getRange(rowNum, processDateColIdx + 1).setValue(today);
+        sheet.getRange(rowNum, accountantColIdx + 1).setValue(userInfo.name || keiriTantouName); // ログイン名を優先
+        
+        // (vOmatome-2 修正) 元のDBにもステータスを書き戻す
+        try {
+          var originalReportId = data[i][originalIdColIdx];
+          var systemType = data[i][systemTypeColIdx];
+          updateSourceDBStatus_(originalReportId, systemType, '支払済', null);
+        } catch (e) {
+          Logger.log('markAsProcessed: 元DBへのステータス書き戻し中にエラー: ' + e.message);
+          // 経理DBの更新は完了しているので、ここではエラーをログに記録するだけ
+        }
+        
+        updatedCount++;
+      }
+    }
+    
+    return { status: "success", message: updatedCount + "件を「支払済」に更新しました。" }; // (vOmatome 修正)
+
+  } catch (e) {
+    Logger.log('markAsProcessed Error: ' + e);
+    return { status: "error", message: '処理ステータスの更新エラー: ' + e.message };
+  }
+}
+
+/**
+ * (クライアントから呼び出される)
+ * 選択された経理処理IDを「経理差戻し」にし、元のDBにも「差戻し」を書き戻す。
+ * (vOmatome 修正) 最終ステータス列への参照を削除、'差戻し理由' 列を使用
+ */
+function markAsRejected(keiriShoriID, rejectionReason) {
+  var userInfo = checkAccess_(); // 権限チェック
+  
+  if (!keiriShoriID || !rejectionReason) {
+    return { status: "error", message: "差し戻し対象のIDまたは理由が不足しています。" };
+  }
+  
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  
+  try {
+    var keiriSs = SpreadsheetApp.openById(KEIRI_DB_ID);
+    var keiriSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+    
+    if (!keiriSheet) {
+      throw new Error('経理DB (KEIRI_DB_ID) に "' + KEIRI_SHEET_NAMES.HEADERS + '" シートが見つかりません。');
+    }
+
+    var data = keiriSheet.getDataRange().getValues();
+    var headers = data[0];
+    
+    // 経理DBの列インデックス
+    var idColIdx = headers.indexOf('経理処理ID');
+    var statusColIdx = headers.indexOf('経理ステータス');
+    var originalIdColIdx = headers.indexOf('元申請ID');
+    var systemTypeColIdx = headers.indexOf('システム区分');
+    
+    if (idColIdx === -1 || statusColIdx === -1 || originalIdColIdx === -1 || systemTypeColIdx === -1) {
+      throw new Error('振込対象ヘッダー シートの列名（経理処理ID, 経理ステータス, 元申請ID, システム区分）が正しくありません。');
+    }
+    
+    var originalReportId = null;
+    var systemType = null;
+    var targetRow = -1;
+
+    // 1. 経理DBで対象行を探す
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][idColIdx] === keiriShoriID) {
+        targetRow = i + 1;
+        originalReportId = data[i][originalIdColIdx];
+        systemType = data[i][systemTypeColIdx];
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+        throw new Error('経理DBに該当する処理IDが見つかりません。');
+    }
+    
+    // 2. 経理DBのステータスを「経理差戻し」に更新
+    keiriSheet.getRange(targetRow, statusColIdx + 1).setValue('経理差戻し');
+
+    // (vOmatome-2 修正) 元の申請DBの更新をヘルパー関数に集約
+    var commentText = '経理担当(' + (userInfo.name || '') + '): ' + rejectionReason;
+    updateSourceDBStatus_(originalReportId, systemType, '差戻し', commentText);
+
+    /* (vOmatome-2 修正) 以下のロジックは updateSourceDBStatus_ に移動
+    // 3. 元の申請DBを更新（書き戻し）
+    var sourceDbId = (systemType === '営業用') ? SALES_DB_ID : GENERAL_DATA_DB_ID;
+... (削除)...
+    }
+    */
+    
+    return { status: "success", message: '申請(' + originalReportId + ')を「差戻し」に更新し、申請者へコメントを送信しました。' };
+
+  } catch (e) {
+    Logger.log('markAsRejected Error: ' + e);
+    return { status: "error", message: '差し戻し処理中にエラーが発生しました: ' + e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/**
+ * (クライアントから呼び出される)
+ * 支払待ちデータをCSV形式でエクスポートする
+ * (vOmatome 修正) 用語変更
+ */
+function exportPendingAsCSV() {
+  checkAccess_(); // 権限チェック
+
+  try {
+    var pendingHeaders = loadPendingHeaders_Internal_(); // すべてのヘッダーを取得
+    
+    // 「支払待ち」のデータのみをフィルタリング (vOmatome 修正)
+    var exportHeaders = pendingHeaders.filter(function(row) {
+      return row['経理ステータス'] === '支払待ち';
+    });
+    
+    if (exportHeaders.length === 0) {
+      // (vOmatome 修正)
+      throw new Error('CSVに出力する「支払待ち」のデータがありません。');
+    }
+
+    // 1. 経理処理IDをリスト化
+    var keiriIdList = exportHeaders.map(function(h) { return h['経理処理ID']; });
+    
+    // 2. 該当する明細データを取得
+    var keiriSs = SpreadsheetApp.openById(KEIRI_DB_ID);
+    var detailSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
+    if (!detailSheet) {
+      throw new Error('経理DB (KEIRI_DB_ID) に "' + KEIRI_SHEET_NAMES.DETAILS + '" シートが見つかりません。');
+    }
+    
+    var detailData = getSheetData_(detailSheet);
+    var exportDetails = detailData.filter(function(d) {
+      return keiriIdList.indexOf(d['経理処理ID']) > -1;
+    });
+
+    // 3. ヘッダーと明細をマージし、CSVデータを作成
+    // ヘッダー行 (CSVとして意味のある列名を選択)
+    var csvHeaders = [
+      "システム区分", "申請日", "申請者名", "合計金額", "経理処理ID", 
+      "利用日", "経費項目名", "金額(税込)", "エリアコード", "備考"
+    ];
+    
+    var csvRows = [];
+    var detailMap = {}; // 明細をヘッダーに紐付ける
+    exportDetails.forEach(function(d) {
+      if (!detailMap[d['経理処理ID']]) detailMap[d['経理処理ID']] = [];
+      detailMap[d['経理処理ID']].push(d);
+    });
+    
+    // データ行
+    exportHeaders.forEach(function(h) {
+      var details = detailMap[h['経理処理ID']] || [];
+      
+      if (details.length === 0) {
+        // 明細がない場合もヘッダー情報だけは出力
+        csvRows.push([
+          h['システム区分'], 
+          h['申請日'], 
+          h['申請者名'], 
+          h['合計金額'], 
+          h['経理処理ID'],
+          // 明細情報は空欄
+          "", "", "", "", ""
+        ]);
+        return;
+      }
+      
+      details.forEach(function(d) {
+        csvRows.push([
+          h['システム区分'], 
+          h['申請日'], 
+          h['申請者名'], 
+          h['合計金額'], 
+          h['経理処理ID'],
+          d['利用日'], 
+          d['経費項目名'], 
+          d['金額'], 
+          d['エリアコード'], 
+          d['備考']
+        ]);
+      });
+    });
+
+    // CSV形式に変換
+    var csvContent = csvHeaders.join(',') + '\n';
+    csvRows.forEach(function(row) {
+      var rowString = row.map(function(cell) {
+        if (typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes('\n'))) {
+          // カンマ、ダブルクォーテーション、改行が含まれる場合はダブルクォーテーションで囲む
+          return '"' + cell.replace(/"/g, '""') + '"';
+        }
+        return cell;
+      }).join(',');
+      csvContent += rowString + '\n';
+    });
+    
+    // ファイル名
+    var date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd');
+    var fileName = 'keiri_pending_' + date + '.csv'; // (vOmatome 修正) ファイル名はそのまま
+    
+    return { status: "success", csvData: csvContent, fileName: fileName };
+
+  } catch (e) {
+    Logger.log('exportPendingAsCSV Error: ' + e);
+    return { status: "error", message: 'CSVエクスポート中にエラーが発生しました: ' + e.message };
+  }
+}
+
+// -----------------------------------------------
+// (vOmatome-2 追加) 
+// -----------------------------------------------
+/**
+ * (内部HELPER) 元の申請DBのステータスとコメントを更新する
+ * @param {string} originalReportId - 元の日報IDまたは経費ID
+ * @param {string} systemType - '営業用' または '一般用'
+ * @param {string} newStatus - '支払済' または '差戻し'
+ * @param {string | null} comment - 差し戻し理由 (null可)
+ */
+function updateSourceDBStatus_(originalReportId, systemType, newStatus, comment) {
+  var sourceDbId = (systemType === '営業用') ? SALES_DB_ID : GENERAL_DATA_DB_ID;
+  var sourceSheetName = (systemType === '営業用') ? SALES_SHEET_NAMES.HEADER : GENERAL_SHEET_NAMES.REPORTS;
+  
+  try {
+    var sourceSs = SpreadsheetApp.openById(sourceDbId);
+    var sourceSheet = sourceSs.getSheetByName(sourceSheetName);
+    
+    if (!sourceSheet) {
+        throw new Error('元の申請DBシートが見つかりません: ' + sourceSheetName);
+    }
+
+    var sourceData = sourceSheet.getDataRange().getValues();
+    var sourceHeaders = sourceData[0];
+    
+    var idColName = (systemType === '営業用') ? '日報ID' : '経費ID';
+    var idCol = sourceHeaders.indexOf(idColName);
+    var statusCol = sourceHeaders.indexOf('承認ステータス');
+    
+    if (idCol === -1 || statusCol === -1) {
+      throw new Error('元の申請DBシートに `' + idColName + '` または `承認ステータス` 列が見つかりません。');
+    }
+
+    for (var i = 1; i < sourceData.length; i++) {
+        if (sourceData[i][idCol] === originalReportId) {
+            var rowNum = i + 1;
+            
+            // 1. ステータスを更新
+            sourceSheet.getRange(rowNum, statusCol + 1).setValue(newStatus);
+            
+            // 2. コメント処理 (commentがnullでない場合のみ)
+            if (comment) {
+              var commentCol = sourceHeaders.indexOf('差戻し理由');
+              if (commentCol === -1) {
+                Logger.log('元の申請DBに `差戻し理由` 列が見つからないため、コメントはスキップされました。');
+              } else {
+                var oldComment = sourceSheet.getRange(rowNum, commentCol + 1).getValue();
+                var finalComment = oldComment ? (oldComment + '\n' + comment) : comment;
+                sourceSheet.getRange(rowNum, commentCol + 1).setValue(finalComment);
+              }
+            }
+            
+            return; // 処理完了
+        }
+    }
+    
+    Logger.log('元の申請DBでID ' + originalReportId + ' が見つかりませんでした。');
+    
+  } catch (e) {
+    Logger.log('updateSourceDBStatus_ Error: ' + e.message);
+    // 元DBへの書き戻しエラーをスローし、呼び出し元でキャッチさせる
+    throw new Error('元の申請DBへの書き戻し中にエラーが発生しました: ' + e.message);
+  }
+}
+
+
+// -----------------------------------------------
+//  HELPER: 元のコードからコピー＆改変
+// -----------------------------------------------
+
+/**
+ * (HELPER) 経費項目マスタをMapで取得
+ * (vKeiri 修正) シート名チェックを追加
+ */
+function getExpenseItemMap_(ss, sheetName) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log('getExpenseItemMap_ Error: シート "' + sheetName + '" が見つかりません。');
+    return {};
+  }
+  
+  var data = getSheetData_(sheet);
+  var map = {};
+  data.forEach(function(item) {
+    if (item['経費項目コード']) { // 項目コードをキーにする
+      map[item['経費項目コード']] = item['経費項目'];
+    }
+  });
+  return map;
+}
+
+/**
+ * (HELPER) 営業用DB (eigyoucode) の getReportDetails 簡易版
+ * (vKeiri 修正) 経費項目名を明細にマージするロジックを追加
+ */
+function getReportDetails_Sales_(reportId, ss, itemsMap) {
+  // 1. ヘッダー情報（必要な列だけ）
+  var headerData = getSheetData_(ss.getSheetByName(SALES_SHEET_NAMES.HEADER));
+  var header = headerData.find(function(row) {
+    return String(row['日報ID']) === String(reportId);
+  });
+  
+  // 2. 経費明細
+  var expensesData = getSheetData_(ss.getSheetByName(SALES_SHEET_NAMES.EXPENSES));
+  var expenses = expensesData.filter(function(row) {
+    return String(row['日報ID']) === String(reportId);
+  });
+  
+  // 3. 経費項目名をマージ
+  expenses = expenses.map(function(exp) {
+      exp.itemName = itemsMap[exp['経費項目コード']] || exp['経費項目コード']; // 項目名を itemName キーに追加
+      return exp;
+  });
+
+  return {
+    header: header || {},
+    expenses: expenses
+  };
+}
+
+/**
+ * (HELPER) 一般用DB (Code.gs) の getReportDetails 簡易版
+ * (vKeiri 修正) 経費項目名を明細にマージするロジックを追加
+ */
+function getReportDetails_General_(reportId, ss, itemsMap) {
+  // 1. ヘッダー情報（必要な列だけ）
+  var headerData = getSheetData_(ss.getSheetByName(GENERAL_SHEET_NAMES.REPORTS));
+  var header = headerData.find(function(row) {
+    return String(row['経費ID']) === String(reportId); // 一般用は '経費ID' がヘッダーID
+  });
+  
+  // 2. 経費明細
+  var expensesData = getSheetData_(ss.getSheetByName(GENERAL_SHEET_NAMES.EXPENSES));
+  var expenses = expensesData.filter(function(row) {
+    return String(row['経費ID']) === String(reportId);
+  });
+  
+  // 3. 経費項目名をマージ
+  expenses = expenses.map(function(exp) {
+      exp.itemName = itemsMap[exp['経費項目コード']] || exp['経費項目コード']; // 項目名を itemName キーに追加
+      return exp;
+  });
+  
+  // (一般用はキー名が一部異なるため、汎用的なキー名に修正)
+  if (header) {
+      header['申請者'] = header['申請者'] || header['申請者名'];
+      header['合計金額'] = header['合計金額'] || header['合計経費'];
+  }
+
+  return {
+    header: header || {},
+    expenses: expenses
+  };
+}
+
+
+/**
+ * (HELPER) 汎用: シートデータをオブジェクト配列に変換
+ * @param {SpreadsheetApp.Sheet} sheet - シートオブジェクト
+ * @returns {Array} - ヘッダーをキーとしたオブジェクトの配列
+ */
+function getSheetData_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) {
+    return []; // ヘッダーのみ、または空
+  }
+  
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = data.shift(); // ヘッダー行を削除して取得
+  
+  var result = data.map(function(row) {
+    var obj = {};
+    headers.forEach(function(header, index) {
+      // 適切な日付フォーマット処理は元のコードにはないので、ここでは簡易的に文字列化
+      if (row[index] instanceof Date) {
+         obj[header] = Utilities.formatDate(row[index], Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+      } else {
+        obj[header] = row[index];
+      }
+    });
+    return obj;
+  });
+  
+  return result;
+}
