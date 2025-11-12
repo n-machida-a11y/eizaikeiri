@@ -10,6 +10,7 @@
   
   <title>日報兼経費精算システム</title>
 
+  <!-- (v2.9) CSSを統合 -->
   <style>
     /* 読み込み中オーバーレイ */
     #loading-overlay {
@@ -104,13 +105,18 @@
     }
 
 
-    /* 承認待ち一覧 (B) */
-    .report-list-item {
+    /* (v2.9) アコーディオン内のテーブル */
+    .approval-accordion-table th, 
+    .approval-accordion-table td {
+      vertical-align: middle;
+    }
+    .approval-accordion-table tbody tr {
       cursor: pointer;
     }
-    .report-list-item:hover {
+    .approval-accordion-table tbody tr:hover {
       background-color: #f8f9fa;
     }
+
 
     /* 日報一覧 (E) */
     #E-my-reports-list-body tr {
@@ -135,12 +141,12 @@
     .hidden-number-input {
       display: none;
     }
-    
   </style>
+
 </head>
 <body>
 
-  <!-- ナビゲーションバー -->
+  <!-- ナビゲーションバー (v2.6 修正) -->
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
     <div class="container-fluid">
       <a class="navbar-brand" href="#"><i class="bi bi-calendar-check"></i> 日報システム</a>
@@ -168,18 +174,19 @@
               <i class="bi bi-cash-coin"></i> 経費精算
             </a>
           </li>
-          <!-- (B) 承認待ち (管理者のみ) -->
-          <? if (isManager) { ?>
+          <!-- (B) チェック・承認待ち (v2.6 修正) -->
+          <!-- (v2.6 修正) isManager -> isChecker || isApprover -->
+          <? if (isChecker || isApprover) { ?>
           <li class="nav-item">
             <a class="nav-link" href="#" data-view="view-B-approval-list">
-              <i class="bi bi-check2-circle"></i> 承認待ち
+              <i class="bi bi-check2-circle"></i> 
+              チェック・承認待ち <!-- (v2.6 修正) 名称変更 -->
               <span class="badge bg-danger" id="approval-count-badge"></span>
             </a>
           </li>
           <? } ?>
         </ul>
         <div class="navbar-text text-white">
-          <!-- (v15 修正) EMPLOYEE_INFO.employeeName -> EMPLOYEE_INFO.name -->
           <span id="user-info-display"></span> <i class="bi bi-person-circle"></i>
         </div>
       </div>
@@ -193,13 +200,11 @@
     <div id="view-A-daily-report" class="app-view">
       <h3 class="mb-3"><i class="bi bi-pencil-square"></i> 日報入力・編集</h3>
 
-      <!-- (v15 修正) 差戻し理由 表示欄 -->
       <div id="A-rejection-reason" class="alert alert-danger" style="display: none;"></div>
 
       <div class="card shadow-sm mb-4">
         <div class="card-body">
           <form id="report-header-form">
-            <!-- 日報ID (隠しフィールド) -->
             <input type="hidden" id="A-reportId">
             
             <div class="row g-3">
@@ -214,7 +219,6 @@
             </div>
 
             <hr>
-
             <h5 class="mt-3">メーター・走行距離</h5>
             <div class="row g-3 align-items-end">
               <div class="col-6 col-md-2">
@@ -235,7 +239,6 @@
               </div>
             </div>
             
-            <!-- (v15 修正) 活動時間合計 表示欄 -->
             <hr>
             <h5 class="mt-3">活動時間 合計</h5>
             <div class="row g-3 align-items-end">
@@ -248,7 +251,6 @@
                 <h4 id="A-totalMeetingTime" class="text-info mb-0">0.0 時間</h4>
               </div>
             </div>
-            
           </form>
         </div>
       </div>
@@ -274,10 +276,10 @@
           </table>
         </div>
         <div class="card-footer text-center">
-          <button type="button" class="btn btn-secondary" onclick="saveOrSubmitReportA('一時保存')">
+          <button type="button" class="btn btn-secondary" id="A-save-button" onclick="saveOrSubmitReportA('一時保存')">
             <i class="bi bi-save"></i> 一時保存
           </button>
-          <button type="button" class="btn btn-primary" onclick="saveOrSubmitReportA('申請中')">
+          <button type="button" class="btn btn-primary" id="A-submit-button" onclick="saveOrSubmitReportA('申請中')">
             <i class="bi bi-send-check"></i> 申請する
           </button>
           <button type="button" class="btn btn-outline-danger ms-3" onclick="resetFormA()">
@@ -286,33 +288,91 @@
         </div>
       </div>
       
-      <!-- (v15 修正) 活動区分の datalist を更新 (休憩を追加) -->
       <datalist id="activity-types-list">
         <option value="出勤">
         <option value="退社">
         <option value="移動">
         <option value="商談">
-        <option value="休憩"> <!-- 追加 -->
+        <option value="休憩">
         <option value="その他">
       </datalist>
-
     </div>
 
-    <!-- ===== (B) 承認待ち一覧ビュー ===== -->
+    <!-- ===== (B) チェック・承認待ち一覧ビュー (v2.9 修正: アコーディオン) ===== -->
     <div id="view-B-approval-list" class="app-view">
-      <h3 class="mb-3"><i class="bi bi-check2-circle"></i> 承認待ち一覧</h3>
-      <div class="card shadow-sm">
-        <div class="list-group list-group-flush" id="B-approval-list-body">
-          <!-- JSで動的生成 (loadPendingReportsB) -->
+      <h3 class="mb-3"><i class="bi bi-check2-circle"></i> チェック・承認待ち一覧</h3>
+      
+      <!-- (v2.9 修正) card + table -> accordion に変更 -->
+      <div class="accordion" id="approval-accordion">
+        
+        <!-- 1. 要チェック（申請中） -->
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="heading-check">
+            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-check" aria-expanded="true" aria-controls="collapse-check">
+              <i class="bi bi-pencil-square me-2"></i>
+              要チェック（申請中）
+              <span class="badge bg-primary ms-2" id="B-count-check">0</span>
+            </button>
+          </h2>
+          <!-- (v2.9) data-bs-parent="#approval-accordion" を削除し、両方開けるようにする -->
+          <div id="collapse-check" class="accordion-collapse collapse show" aria-labelledby="heading-check">
+            <div class="accordion-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover mb-0 approval-accordion-table">
+                  <thead class="table-light">
+                    <tr>
+                      <th>日付</th>
+                      <th>申請者</th>
+                      <th>チェック状況</th>
+                      <th>合計経費 (円)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="B-approval-list-body-check">
+                    <!-- JSで動的生成 -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
+        
+        <!-- 2. 要承認（チェック済） -->
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="heading-approve">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-approve" aria-expanded="false" aria-controls="collapse-approve">
+              <i class="bi bi-check2-circle me-2"></i>
+              要承認（チェック済）
+              <span class="badge bg-warning text-dark ms-2" id="B-count-approve">0</span>
+            </button>
+          </h2>
+          <div id="collapse-approve" class="accordion-collapse collapse" aria-labelledby="heading-approve">
+            <div class="accordion-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover mb-0 approval-accordion-table">
+                  <thead class="table-light">
+                    <tr>
+                      <th>日付</th>
+                      <th>申請者</th>
+                      <th>チェック状況</th>
+                      <th>合計経費 (円)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="B-approval-list-body-approve">
+                    <!-- JSで動的生成 -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        
       </div>
     </div>
 
-    <!-- ===== (C) 日報詳細ビュー ===== -->
+    <!-- ===== (C) 日報詳細ビュー (v2.9 修正: 領収書ボタン) ===== -->
     <div id="view-C-report-detail" class="app-view">
       <h3 class="mb-3"><i class="bi bi-file-earmark-text"></i> 日報詳細</h3>
       
-      <!-- 戻るボタン -->
       <button class="btn btn-outline-secondary mb-3" id="C-back-button">
         <i class="bi bi-arrow-left"></i> 戻る
       </button>
@@ -321,7 +381,7 @@
       <div class="card shadow-sm mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0" id="C-header-date"></h5>
-          <span class="badge fs-6" id="C-header-status-badge"></span>
+          <span id="C-header-status-badge"></span> 
         </div>
         <div class="card-body">
           <div class="row">
@@ -337,23 +397,40 @@
             <div class="col-md-6">
               <strong>合計経費:</strong> <span id="C-header-total-expense" class="text-danger fw-bold"></span> 円
             </div>
-            
-            <!-- v5 修正: 時間合計の表示欄を追加 -->
             <div class="col-md-6">
               <strong>移動時間合計:</strong> <span id="C-header-movement-time"></span> 時間
             </div>
             <div class="col-md-6">
               <strong>商談時間合計:</strong> <span id="C-header-meeting-time"></span> 時間
             </div>
-            
             <div class="col-12 mt-2">
               <strong>備考:</strong> <pre id="C-header-remarks" class="bg-light p-2 rounded mb-0"></pre>
             </div>
             
-            <!-- (v18 新規) 差戻し理由 (詳細画面) -->
             <div class="col-12 mt-2" id="C-rejection-reason-wrapper" style="display: none;">
               <strong>差戻し理由:</strong>
               <pre id="C-rejection-reason" class="bg-danger-subtle text-danger-emphasis p-2 rounded mb-0"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- (v2.6 新規) 承認履歴 -->
+      <div class="card shadow-sm mb-4">
+        <div class="card-header">承認履歴</div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <strong>チェック者:</strong> <span id="C-history-checker">N/A</span>
+            </div>
+            <div class="col-md-6">
+              <strong>チェック日時:</strong> <span id="C-history-check-date">N/A</span>
+            </div>
+            <div class="col-md-6">
+              <strong>承認者:</strong> <span id="C-history-approver">N/A</span>
+            </div>
+            <div class="col-md-6">
+              <strong>承認日時:</strong> <span id="C-history-approve-date">N/A</span>
             </div>
           </div>
         </div>
@@ -378,21 +455,18 @@
         </div>
       </div>
 
-      <!-- 経費明細 -->
+      <!-- 経費明細 (v2.9 修正: 領収書ボタン) -->
       <div class="card shadow-sm mb-4">
         <div class="card-header">経費明細</div>
         <div class="table-responsive">
           <table class="table table-striped mb-0">
             <thead class="table-light">
               <tr>
-                <!-- (v19 修正) 「時間帯」列を追加 -->
                 <th>時間帯</th>
                 <th>利用日</th>
                 <th>経費項目</th>
                 <th>金額 (円)</th>
-                <!-- (v20 修正) エリア列を追加 -->
                 <th>エリア</th>
-                <!-- (v22 新規) 税関連の列を追加 -->
                 <th>税抜金額 (円)</th>
                 <th>税率</th>
                 <th>備考</th>
@@ -406,15 +480,10 @@
         </div>
       </div>
 
-      <!-- 承認/差戻しボタン (管理者のみ) -->
+      <!-- 承認/差戻しボタン (v2.6 修正) -->
       <div id="C-approval-buttons" class="text-center" style="display: none;">
         <input type="hidden" id="C-reportId">
-        <button class="btn btn-danger btn-lg" onclick="handleRejectC()">
-          <i class="bi bi-x-circle"></i> 差戻し
-        </button>
-        <button class="btn btn-success btn-lg ms-3" onclick="handleApproveC()">
-          <i class="bi bi-check-circle"></i> 承認する
-        </button>
+        <!-- JSで動的生成 (handleCheckC / handleApproveC) -->
       </div>
 
     </div>
@@ -465,7 +534,7 @@
       </div>
     </div>
 
-    <!-- ===== (E) 日報一覧ビュー ===== -->
+    <!-- ===== (E) 日報一覧ビュー (v2.5.2 修正) ===== -->
     <div id="view-E-my-reports" class="app-view">
       <h3 class="mb-3"><i class="bi bi-list-task"></i> 日報一覧 (自分)</h3>
       <div class="card shadow-sm">
@@ -489,7 +558,7 @@
               </tr>
             </thead>
             <tbody id="E-my-reports-list-body">
-              <!-- JSで動的生成 -->
+              <!-- JSで動的生成 (v2.5.2 グルーピング対応) -->
             </tbody>
           </table>
         </div>
@@ -510,7 +579,7 @@
   </div>
 
 
-  <!-- (A) 経費登録モーダル (v22: 税計算、OCR廃止) (v24: カンマ入力対応) -->
+  <!-- (A) 経費登録モーダル (v24: カンマ入力対応) -->
   <div class="modal fade" id="expenseModal" tabindex="-1" aria-labelledby="expenseModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content">
@@ -520,18 +589,14 @@
         </div>
         <div class="modal-body">
           <form id="expense-form">
-            <!-- 経費ID (編集用) -->
             <input type="hidden" id="M-expenseId">
-            <!-- 紐づく時間 (バッジ更新用) -->
             <input type="hidden" id="M-timeSlot">
             
             <div class="row g-3">
-              <!-- (v23 修正) col-md-6 -> col-12 -->
               <div class="col-12">
                 <label for="M-useDate" class="form-label">利用日 <span class="text-danger">*</span></label>
                 <input type="date" class="form-control" id="M-useDate" required>
               </div>
-              <!-- (v23 修正) col-md-6 -> col-12 -->
               <div class="col-12">
                 <label for="M-itemCode" class="form-label">経費項目 <span class="text-danger">*</span></label>
                 <select class="form-select" id="M-itemCode" required>
@@ -540,7 +605,6 @@
                 </select>
               </div>
 
-              <!-- (v20 新規) エリア選択 (v23 修正) col-md-6 -> col-12 -->
               <div class="col-12" id="M-area-wrapper" style="display: none;">
                 <label for="M-areaCode" class="form-label">エリア <span class="text-danger">*</span></label>
                 <select class="form-select" id="M-areaCode">
@@ -549,19 +613,12 @@
                 </select>
               </div>
 
-              <!-- (v22 修正) 金額 (税込) (v23 修正) col-md-6 -> col-12 -->
               <div class="col-12">
                 <label for="M-amount" class="form-label">金額 (円) <span class="text-danger">*</span></label>
-                <!-- (v24 変更) 実際の入力欄 (カンマ表示用) -->
                 <input type="tel" class="form-control" id="M-amount-display-input" placeholder="税込金額" inputmode="numeric">
-                <!-- (v24 変更) データを保持する number input (隠す) -->
                 <input type="number" class="hidden-number-input" id="M-amount" required>
-                <!-- (v20) 上限表示用 (v23: 削除) -->
-                <!-- (v22) カンマ区切り表示用 (v23: 削除 -> v24: input 自体にカンマを振るため不要) -->
-                <!-- <div id="M-amount-display" class="form-text text-muted"></div> -->
               </div>
               
-              <!-- (v22 新規) 消費税率 (v23 修正) col-md-6 -> col-12 / 順序変更 -->
               <div class="col-12">
                 <label for="M-tax-rate-select" class="form-label">消費税率</label>
                 <div class="input-group">
@@ -578,15 +635,10 @@
                 </div>
               </div>
 
-              <!-- (v22 新規) 税抜金額 (v23 修正) col-md-6 -> col-12 / 順序変更 -->
               <div class="col-12">
                 <label for="M-amount-excluding-tax" class="form-label">税抜金額 (円)</label>
-                <!-- (v24 変更) 実際の入力欄 (カンマ表示用) -->
                 <input type="tel" class="form-control" id="M-amount-excluding-tax-display-input" placeholder="税抜金額" inputmode="numeric">
-                <!-- (v24 変更) データを保持する number input (隠す) -->
                 <input type="number" class="hidden-number-input" id="M-amount-excluding-tax">
-                <!-- (v22) カンマ区切り表示用 (v23: 削除 -> v24: input 自体にカンマを振るため不要) -->
-                <!-- <div id="M-amount-excluding-tax-display" class="form-text text-muted"></div> -->
               </div>
               
               <div class="col-12">
@@ -596,34 +648,24 @@
               
               <hr class="my-2">
               
-              <!-- (v22 修正) AI-OCR 関連を削除 -->
               <div class="col-12">
                 <label for="M-receiptImage" class="form-label">領収書アップロード</label>
-                <!-- (v22) "accept" を "image/*" に -->
-                <!-- (v24 変更) "capture" 属性を削除 (カメラ + フォルダ選択) -->
                 <input class="form-control" type="file" id="M-receiptImage" accept="image/*">
-                <!-- (v24 削除) （スマホの場合、カメラが起動します）のテキストを削除 -->
-                <!-- <div class="form-text">（スマホの場合、カメラが起動します）</div> -->
               </div>
-              
-              <!-- (v22 削除) M-ocr-status は削除 -->
-              <!-- <div id="M-ocr-status" class="mt-2"></div> -->
               
               <div class="col-12">
                 <label for="M-receiptUrl" class="form-label">領収書URL</label>
-                <!-- (v22 変更) readonly を維持し、placeholder を追加 -->
                 <input type="text" class="form-control" id="M-receiptUrl" readonly placeholder="アップロードするとここにURLが表示されます">
               </div>
             </div>
           </form>
         </div>
         <div class="modal-footer">
-          <!-- (v19 修正) 削除ボタンを追加 -->
           <button type="button" class="btn btn-outline-danger me-auto" id="M-delete-expense" onclick="deleteExpenseItemA()" style="display: none;">
             <i class="bi bi-trash"></i> 削除
           </button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
-          <button type="button" class="btn btn-primary" onclick="addExpenseItemA()">
+          <button type="button" class="btn btn-primary" id="M-submit-expense" onclick="addExpenseItemA()">
             <i class="bi bi-check-lg"></i> この内容で登録
           </button>
         </div>
@@ -673,20 +715,24 @@
   <!-- Bootstrap 5 JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-  <!-- クライアントサイド JavaScript (ES5準拠) (v22: 税計算、OCR廃止) (v24: カンマ入力対応) -->
+  <!-- (v2.9) JavaScriptを統合 -->
   <script>
     // --- グローバル変数 -------------------------------------------------
     
     // GASから渡されるデータ
-    var EMPLOYEE_INFO = <?!= employeeInfo ?>;
-    var IS_MANAGER = <?!= isManager ?>; // Boolean (GASから渡されます)
-    var EXPENSE_ITEMS_MASTER = <?!= expenseItems ?>;
-    var TRAVEL_RULES_MASTER = <?!= travelRules ?>; // v20: 追加
-    var LODGING_AREAS_MASTER = <?!= lodgingAreas ?>; // v20: 追加
-    // v21: 追加マスタ
-    var JOB_CATEGORIES_MASTER = <?!= jobCategories ?>;
-    var POSITIONS_MASTER = <?!= positions ?>;
-    var DEPARTMENTS_MASTER = <?!= departments ?>;
+    // (v2.7.4) JSON.parse() が失敗しないよう、空のJSON文字列をデフォルトとする
+    var EMPLOYEE_INFO = JSON.parse('<?!= employeeInfo ?>' || '{}');
+    // (v2.6 修正) isManager を isChecker/isApprover に変更
+    var IS_CHECKER = <?!= isChecker ?>; // Boolean (GASから渡されます)
+    var IS_APPROVER = <?!= isApprover ?>; // Boolean (GASから渡されます)
+    
+    // マスタデータも安全にパース
+    var EXPENSE_ITEMS_MASTER = JSON.parse('<?!= expenseItems ?>' || '[]');
+    var TRAVEL_RULES_MASTER = JSON.parse('<?!= travelRules ?>' || '[]');
+    var LODGING_AREAS_MASTER = JSON.parse('<?!= lodgingAreas ?>' || '[]');
+    var JOB_CATEGORIES_MASTER = JSON.parse('<?!= jobCategories ?>' || '[]');
+    var POSITIONS_MASTER = JSON.parse('<?!= positions ?>' || '[]');
+    var DEPARTMENTS_MASTER = JSON.parse('<?!= departments ?>' || '[]');
     
     // (A) 日報入力用データ
     var currentActivities = {}; // { "07:00": { type: "...", content: "..." }, ... }
@@ -699,7 +745,6 @@
       "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
       "16:00", "16:30", "17:00", "17:30", "18:00"
     ];
-    // ※ 18:00 は "18:00-18:30" の開始時刻として定義。終了時刻は "18:30" まで。
 
     // (A) 経費モーダルのインスタンス
     var expenseModalInstance;
@@ -723,7 +768,7 @@
      * DOM読み込み完了時の初期化処理
      */
     document.addEventListener('DOMContentLoaded', function() {
-      // ユーザー情報表示 (v15 修正)
+      // ユーザー情報表示
       document.getElementById('user-info-display').textContent = EMPLOYEE_INFO.name || 'ゲスト';
       
       // ナビゲーションの初期化
@@ -749,16 +794,14 @@
       // (A) メーター自動計算のイベントリスナー設定
       setupMileageCalculatorA();
 
-      // (A) 領収書アップロードのイベントリスナー設定 (v22: AI-OCR廃止)
+      // (A) 領収書アップロードのイベントリスナー設定
       document.getElementById('M-receiptImage').addEventListener('change', handleImageUploadA);
       
       // (v20 新規) 経費モーダルのロジック用イベントリスナー
       document.getElementById('M-itemCode').addEventListener('change', onItemCodeChangeA);
       document.getElementById('M-areaCode').addEventListener('change', onAreaCodeChangeA);
-      document.getElementById('M-amount').addEventListener('input', checkExpenseLimitA);
       
       // (v22 新規) 税計算用のイベントリスナー
-      // (v24 変更) 実際のデータinput ('M-amount') をトリガーにする
       document.getElementById('M-amount').addEventListener('input', handleTaxCalculationA);
       document.getElementById('M-amount-excluding-tax').addEventListener('input', handleTaxCalculationA);
       document.getElementById('M-tax-rate-select').addEventListener('change', handleTaxCalculationA);
@@ -833,19 +876,31 @@
 
     /**
      * (v18 新規) カスタムAlert/Promptモーダルの初期化
+     * (★ 2025/11/12 修正) Alertモーダルが「OK」ボタンでのみコールバックを実行するように修正
      */
     function initializeCustomModalsA() {
       var alertModalEl = document.getElementById('customAlertModal');
       customAlertModalInstance = new bootstrap.Modal(alertModalEl);
       
-      // Alertモーダルが閉じたときにコールバックを実行
-      alertModalEl.addEventListener('hidden.bs.modal', function() {
+      // (★修正) OKボタンがクリックされた時だけコールバックを実行
+      document.getElementById('customAlertOkButton').addEventListener('click', function() {
         if (typeof customAlertCallback === 'function') {
           customAlertCallback();
           customAlertCallback = null; // コールバックをリセット
         }
+        // OKボタンには data-bs-dismiss="modal" が付いているため、自動で閉じる
+      });
+      
+      // (★修正) Alertモーダルが閉じたとき（OK以外で閉じた場合）
+      alertModalEl.addEventListener('hidden.bs.modal', function() {
+        // もしOKボタンが押されずに閉じられた場合（コールバックが残っている場合）、
+        // コールバックをキャンセル（null化）する。
+        if (typeof customAlertCallback === 'function') {
+          customAlertCallback = null; // コールバックをリセット（実行しない）
+        }
       });
 
+      // --- Promptモーダルの処理 (ここは変更なし) ---
       var promptModalEl = document.getElementById('customPromptModal');
       customPromptModalInstance = new bootstrap.Modal(promptModalEl);
       
@@ -965,12 +1020,23 @@
     function onApiError(error) {
       showLoading(false); // ローディングを非表示
       
+      // (★修正) アップロード中だった場合はボタンを有効に戻す
+      // idが存在しないビューでエラーにならないよう、存在チェック
+      var saveBtn = document.getElementById('A-save-button');
+      var submitBtn = document.getElementById('A-submit-button');
+      if (saveBtn) saveBtn.disabled = false;
+      if (submitBtn) submitBtn.disabled = false;
+      
+      // (★修正) モーダル内の登録ボタンも有効に戻す
+      var modalSubmitBtn = document.getElementById('M-submit-expense');
+      if (modalSubmitBtn) modalSubmitBtn.disabled = false;
+      
       var message = '不明なエラーが発生しました。';
       
       if (typeof error === 'string') {
         message = error;
       } else if (error && error.message) {
-        // v10 修正: GAS側で new Error() したエラー
+        // GAS側で new Error() したエラー
         var gasErrorMsg = error.message.split('->').pop();
         message = gasErrorMsg ? gasErrorMsg.trim() : error.message;
       }
@@ -996,10 +1062,10 @@
     }
     
     /**
-     * 小数点第1位までに丸める (v15 修正)
+     * 小数点第1位までに丸める
      */
     function formatHours(hours) {
-      return (Math.round((hours || 0) * 10) / 10).toFixed(1); // v15: 少数第1位に変更
+      return (Math.round((hours || 0) * 10) / 10).toFixed(1); // 少数第1位に変更
     }
     
     /**
@@ -1019,12 +1085,37 @@
         return dateStr; // 変換失敗時はそのまま返す
       }
     }
+    
+    /**
+     * (v2.6 新規) 日付+時刻文字列をフォーマット
+     * @param {string | Date} dateStr yyyy/MM/dd HH:mm:ss 形式の文字列またはDateオブジェクト
+     * @returns {string} yyyy/MM/dd HH:mm 形式
+     */
+    function formatDateTime(dateStr) {
+      if (!dateStr) return 'N/A';
+      try {
+        // GAS側から来る文字列 (yyyy/MM/dd HH:mm:ss) または Date オブジェクトを処理
+        var date = (dateStr instanceof Date) 
+            ? dateStr 
+            : new Date(dateStr.replace(/-/g, '/'));
+            
+        var yyyy = date.getFullYear();
+        var mm = ('0' + (date.getMonth() + 1)).slice(-2);
+        var dd = ('0' + date.getDate()).slice(-2);
+        var HH = ('0' + date.getHours()).slice(-2);
+        var MM = ('0' + date.getMinutes()).slice(-2);
+        
+        return yyyy + '/' + mm + '/' + dd + ' ' + HH + ':' + MM;
+      } catch (e) {
+        return dateStr;
+      }
+    }
 
 
     // --- (A) 日報入力機能 ----------------------------------------------
 
     /**
-     * (A) タイムシートを描画する (v18 修正: バッジ更新削除)
+     * (A) タイムシートを描画する
      */
     function renderTimesheetA() {
       var tbody = document.getElementById('A-timesheet-body');
@@ -1032,7 +1123,6 @@
 
       for (var i = 0; i < TIME_SLOTS.length - 1; i++) { // 最後の "18:00" は次の開始時刻なのでループ対象外
         var startTime = TIME_SLOTS[i];
-        var endTime = TIME_SLOTS[i+1];
         
         // 復元データ
         var activity = currentActivities[startTime] || { type: '', content: '' };
@@ -1042,7 +1132,7 @@
         // 時間
         tr.innerHTML = '<th class="time-col table-light">' + startTime + '</th>';
         
-        // (v5 修正) 活動区分 (select -> input+datalist)
+        // 活動区分
         var tdType = document.createElement('td');
         tdType.className = 'type-col';
         var inputType = document.createElement('input');
@@ -1083,20 +1173,17 @@
           '<span class="expense-button" ' +
                 'id="expense-badge-' + startTime + '" ' +
                 'onclick="openExpenseModalA(\'' + startTime + '\')">' +
-            '<i class="bi bi-plus"></i>' + // bi-plus-lg から bi-plus に変更
+            '<i class="bi bi-plus"></i>' +
             '<span class="expense-count" id="expense-count-' + startTime + '">0</span>' + // カウントはCSSで非表示
           '</span>';
         tr.appendChild(tdExpense);
         
         tbody.appendChild(tr);
       }
-      
-      // (v18 修正) 経費バッジの更新は onLoadReportForEditSuccessA 側で実行するため、ここから削除
-      // updateAllExpenseBadgesA(); 
     }
 
     /**
-     * (A) フォーム(A)全体をリセットする (v18 修正: バッジ更新削除)
+     * (A) フォーム(A)全体をリセットする
      */
     function resetFormA() {
       document.getElementById('report-header-form').reset();
@@ -1104,11 +1191,11 @@
       document.getElementById('A-date').value = getTodayString();
       document.getElementById('A-mileageDisplay').textContent = '0 km';
       
-      // (v15 修正) 時間合計表示をリセット
+      // 時間合計表示をリセット
       document.getElementById('A-totalMovementTime').textContent = '0.0 時間';
       document.getElementById('A-totalMeetingTime').textContent = '0.0 時間';
       
-      // (v15 修正) 差戻し理由を非表示
+      // 差戻し理由を非表示
       var reasonDiv = document.getElementById('A-rejection-reason');
       reasonDiv.textContent = '';
       reasonDiv.style.display = 'none';
@@ -1120,9 +1207,7 @@
       document.querySelectorAll('.A-activity-type').forEach(function(el) { el.value = ''; });
       document.querySelectorAll('.A-activity-content').forEach(function(el) { el.value = ''; });
       
-      // (v18 修正) 経費バッジをリセット
-      // updateAllExpenseBadgesA(); // ここで呼ぶと onLoadReportForEditSuccessA で問題が起きるため削除
-      // (v18) 代わりに手動でバッジをクリア
+      // 経費バッジをリセット
       document.querySelectorAll('.expense-button').forEach(function(badge) {
         badge.classList.remove('has-expense');
       });
@@ -1155,7 +1240,7 @@
     }
 
     /**
-     * (A) currentActivities オブジェクトを更新 (v15 修正)
+     * (A) currentActivities オブジェクトを更新
      * @param {string} timeSlot "07:00" など
      * @param {'type' | 'content'} key 'type' または 'content'
      * @param {string} value 入力値
@@ -1166,7 +1251,7 @@
       }
       currentActivities[timeSlot][key] = value;
       
-      // (v15 修正) 活動時間をリアルタイム計算
+      // 活動時間をリアルタイム計算
       calculateTotalsA();
     }
 
@@ -1201,7 +1286,7 @@
     }
     
     /**
-     * (A) (v15 新規) 活動時間（移動・商談）を計算して表示
+     * (A) 活動時間（移動・商談）を計算して表示
      */
     function calculateTotalsA() {
       var totalMovementHours = 0;
@@ -1228,7 +1313,7 @@
 
 
     /**
-     * (A) 経費モーダルを開く (v20 修正: 編集ロジック・規定ロジック) (v22: 税項目) (v24: カンマ入力)
+     * (A) 経費モーダルを開く (v24: カンマ入力対応)
      * @param {string} timeSlot "07:00" など
      */
     function openExpenseModalA(timeSlot) {
@@ -1237,31 +1322,27 @@
       document.getElementById('M-expenseId').value = '';
       document.getElementById('M-timeSlot').value = timeSlot; // 紐づく時間をセット
       
-      // (v22 修正) OCRステータス -> URL欄
+      // URL欄をリセット
       document.getElementById('M-receiptUrl').value = '';
       document.getElementById('M-receiptUrl').placeholder = 'アップロードするとここにURLが表示されます';
       
-      // (v20) 規定ロジック・UIをリセット
+      // 規定ロジック・UIをリセット
       document.getElementById('M-area-wrapper').style.display = 'none';
       document.getElementById('M-areaCode').required = false;
       document.getElementById('M-areaCode').value = '';
-      // (v23: 削除) document.getElementById('M-amount-limit-note').textContent = '';
       currentExpenseLimit = null;
       checkExpenseLimitA(); // 背景色をリセット
       
-      // (v22 新規) 税・カンマ表示をリセット
-      // (v23: 削除) updateAmountDisplayA('M-amount');
-      // (v24 変更) カンマ入力欄をリセット
+      // 税・カンマ表示をリセット
       updateKanmaInputA('M-amount', '');
       updateKanmaInputA('M-amount-excluding-tax', '');
       document.getElementById('M-tax-rate-select').value = 'auto';
       toggleCustomTaxRateA(); // 手入力欄を非表示
       
-      // (v19 修正) 削除ボタン
+      // 削除ボタン
       var deleteButton = document.getElementById('M-delete-expense');
       
-      // (v19 修正) この時間枠に既存の経費があるか検索
-      // TODO: 現状は1枠1経費のみ対応
+      // 既存の経費があるか検索
       var expenseToEdit = currentExpenses.find(function(ex) {
         return ex.timeSlot === timeSlot;
       });
@@ -1269,31 +1350,28 @@
       if (expenseToEdit) {
         // 経費が見つかった場合 (編集モード)
         document.getElementById('M-expenseId').value = expenseToEdit.expenseId;
-        // (v19 修正) 日付は yyyy/MM/dd (GAS) または yyyy-MM-dd (JS) のため、- に統一
+        // 日付は yyyy/MM/dd (GAS) または yyyy-MM-dd (JS) のため、- に統一
         document.getElementById('M-useDate').value = expenseToEdit.useDate.replace(/\//g, '-');
         document.getElementById('M-itemCode').value = expenseToEdit.itemCode;
-        // document.getElementById('M-amount').value = expenseToEdit.amount; // (v20) onchangeロジックでセット
         document.getElementById('M-remarks').value = expenseToEdit.remarks;
         document.getElementById('M-receiptUrl').value = expenseToEdit.receiptUrl;
-        document.getElementById('M-areaCode').value = expenseToEdit.areaCode || ''; // (v20)
+        document.getElementById('M-areaCode').value = expenseToEdit.areaCode || '';
         
-        // (v22 新規) 税項目を復元
+        // 税項目を復元
         document.getElementById('M-tax-rate-select').value = expenseToEdit.taxRate || 'auto';
         document.getElementById('M-tax-rate-custom').value = expenseToEdit.taxRateCustom || '';
 
         deleteButton.style.display = 'inline-block'; // 削除ボタン表示
         
-        // (v20) 編集読み込み時のロジック実行
+        // 編集読み込み時のロジック実行
         // 1. 項目変更イベントを強制発火 (エリア表示/非表示、上限額セット)
         onItemCodeChangeA(); 
-        // 2. 金額を上書き (onItemCodeChangeA が初期値をセットするため)
-        // (v24 変更) カンマ入力更新用の関数を使用
+        // 2. 金額を上書き
         updateKanmaInputA('M-amount', expenseToEdit.amount);
         // 3. 上限チェックを強制発火 (読み込んだ金額で背景色を判定)
         checkExpenseLimitA();
         
-        // (v22 新規) 読み込み後に税計算・カンマ表示を強制実行
-        // (v24 変更) カンマ入力更新用の関数を使用
+        // 4. 読み込み後に税計算・カンマ表示を強制実行
         updateKanmaInputA('M-amount-excluding-tax', expenseToEdit.taxExcludedAmount);
         handleTaxCalculationA({ target: { id: 'M-amount' } });
 
@@ -1302,7 +1380,6 @@
         // 利用日は日報の日付をデフォルトセット
         document.getElementById('M-useDate').value = document.getElementById('A-date').value || getTodayString();
         deleteButton.style.display = 'none'; // 削除ボタン非表示
-        // (v20) 新規の場合、onItemCodeChangeA はユーザーが選択するまで待機
       }
       
       expenseModalInstance.show();
@@ -1316,35 +1393,32 @@
     }
 
     /**
-     * (A) 経費モーダル非表示時の処理 (v20, v22, v24 修正)
+     * (A) 経費モーダル非表示時の処理
      */
     function onExpenseModalHideA() {
       // フォームとファイルインプットをクリア
       document.getElementById('expense-form').reset();
       document.getElementById('M-receiptImage').value = ''; // fileインプットもクリア
-      document.getElementById('M-delete-expense').style.display = 'none'; // (v19)
+      document.getElementById('M-delete-expense').style.display = 'none';
       
-      // (v20) 規定ロジック・UIをリセット
+      // 規定ロジック・UIをリセット
       document.getElementById('M-area-wrapper').style.display = 'none';
       document.getElementById('M-areaCode').required = false;
       document.getElementById('M-areaCode').value = '';
-      // (v23: 削除) document.getElementById('M-amount-limit-note').textContent = '';
       currentExpenseLimit = null;
       checkExpenseLimitA(); // 背景色をリセット
       
-      // (v22 新規) カンマ区切り表示をリセット
-      // (v23: 削除) 
-      // (v24 変更) カンマ入力欄をリセット
+      // カンマ区切り表示をリセット
       updateKanmaInputA('M-amount', '');
       updateKanmaInputA('M-amount-excluding-tax', '');
       
-      // (v22 新規) 税率フォームをリセット (reset()だけでは 'auto' にならないため)
+      // 税率フォームをリセット
       document.getElementById('M-tax-rate-select').value = 'auto';
       toggleCustomTaxRateA(); // 手入力欄を非表示
     }
 
     /**
-     * (A) (v22 変更) 領収書画像アップロード処理 (AI-OCR廃止版)
+     * (A) 領収書画像アップロード処理
      */
     function handleImageUploadA(event) {
       var file = event.target.files[0];
@@ -1355,46 +1429,51 @@
       reader.onload = function() {
         var base64Image = reader.result;
         
-        // (v22 変更) OCRステータス -> URL欄
         var statusEl = document.getElementById('M-receiptUrl');
         statusEl.value = 'アップロード中です...';
+        
+        // (★修正) 申請ボタンを無効化
+        document.getElementById('A-save-button').disabled = true;
+        document.getElementById('A-submit-button').disabled = true;
+        // (★修正) モーダル内の登録ボタンも無効化
+        document.getElementById('M-submit-expense').disabled = true;
         
         showLoading(true, '領収書をアップロード中...');
         
         google.script.run
-          .withSuccessHandler(onReceiptUploadSuccessA) // (v22) 成功ハンドラをリネーム
+          .withSuccessHandler(onReceiptUploadSuccessA)
           .withFailureHandler(onApiError)
-          .uploadReceiptImage(base64Image); // (v22) AI-OCRではなく、画像保存関数を呼ぶ
+          .uploadReceiptImage(base64Image);
       };
       reader.onerror = function(error) {
         console.error("File reading error: ", error);
-        showCustomAlert('ファイルの読み込みに失敗しました。'); // (v18 修正)
+        showCustomAlert('ファイルの読み込みに失敗しました。');
       };
     }
 
     /**
-     * (A) (v22 変更) AI-OCR成功時のコールバックをリネーム (onOcrSuccessA -> onReceiptUploadSuccessA)
+     * (A) 領収書画像アップロード成功時のコールバック
      * @param {object} result { status: "success", url: "..." }
      */
     function onReceiptUploadSuccessA(result) {
       showLoading(false);
       
-      // (v22) result は { status: "success", url: "..." } または { status: "error", ... }
+      // (★修正) 申請ボタンを有効化
+      document.getElementById('A-save-button').disabled = false;
+      document.getElementById('A-submit-button').disabled = false;
+      // (★修正) モーダル内の登録ボタンも有効化
+      document.getElementById('M-submit-expense').disabled = false;
+      
       if (result && result.status === 'success' && result.url) {
-        
-        // (v22 変更) フォームに自動入力 (URLのみ)
         document.getElementById('M-receiptUrl').value = result.url;
-        
-        // (v22 削除) OCRによる自動入力ロジックはすべて削除
-        
       } else {
-        onApiError((result && result.message) || '領収書のアップロードに失敗しました。'); // (v18 修正)
+        onApiError((result && result.message) || '領収書のアップロードに失敗しました。');
         document.getElementById('M-receiptUrl').value = 'アップロード失敗';
       }
     }
 
     /**
-     * (A) (v20 新規) 経費項目コード（日当/宿泊費）の上限額を取得
+     * (A) 経費項目コード（日当/宿泊費）の上限額を取得
      * @param {string} itemCode '101' (日当) または '102' (宿泊費)
      * @param {string} [areaCode] '102' (宿泊費) の場合のみ
      * @returns {number | null} 上限額 (見つからない場合は null)
@@ -1408,7 +1487,6 @@
         }
         
         // 1. ユーザーの役職コードで「出張旅費規定マスタ」を検索
-        // (v20) マスタの「役職」列は数値の可能性があるため、== で比較
         var rule = TRAVEL_RULES_MASTER.find(function(r) {
           return String(r['役職']) === String(userPositionCode);
         });
@@ -1460,10 +1538,8 @@
       var areaWrapper = document.getElementById('M-area-wrapper');
       var areaSelect = document.getElementById('M-areaCode');
       var amountInput = document.getElementById('M-amount'); // (v24) 隠された number input
-      // (v23: 削除) var amountNote = document.getElementById('M-amount-limit-note');
       
       // リセット
-      // (v23: 削除) amountNote.textContent = '';
       currentExpenseLimit = null;
       
       if (itemCode === '101') { // 日当
@@ -1473,11 +1549,8 @@
         
         var limit = getExpenseLimitA(itemCode);
         if (limit !== null) {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', limit); // 初期値としてセット
-          // (v23: 削除) amountNote.textContent = '規定額: ' + formatNumber(limit) + '円';
         } else {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', ''); // 規定が見つからない
         }
         
@@ -1490,11 +1563,8 @@
         var limit = getExpenseLimitA(itemCode, currentAreaCode);
         
         if (limit !== null) {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', limit); // 初期値としてセット
-          // (v23: 削除) amountNote.textContent = '上限額: ' + formatNumber(limit) + '円';
         } else {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', ''); // 規定が見つからない
         }
         
@@ -1502,11 +1572,10 @@
         areaWrapper.style.display = 'none';
         areaSelect.required = false;
         areaSelect.value = '';
-        // (v24 変更) カンマ入力更新用の関数を使用
         updateKanmaInputA('M-amount', ''); // 金額をクリア (初期値は設定しない)
       }
       
-      // (v22 新規) 規定額がセットされた場合、税計算とカンマ表示をトリガー
+      // 規定額がセットされた場合、税計算とカンマ表示をトリガー
       handleTaxCalculationA({ target: { id: 'M-amount' } });
       
       // 最後に、セットされた金額で上限チェック（背景色リセット）
@@ -1525,16 +1594,12 @@
         var limit = getExpenseLimitA(itemCode, areaCode);
         
         if (limit !== null) {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', limit); // 初期値としてセット
-          // (v23: 削除) document.getElementById('M-amount-limit-note').textContent = '上限額: ' + formatNumber(limit) + '円';
         } else {
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount', '');
-          // (v23: 削除) document.getElementById('M-amount-limit-note').textContent = '規定が見つかりません。';
         }
         
-        // (v22 新規) 規定額がセットされた場合、税計算とカンマ表示をトリガー
+        // 規定額がセットされた場合、税計算とカンマ表示をトリガー
         handleTaxCalculationA({ target: { id: 'M-amount' } });
         
         checkExpenseLimitA();
@@ -1569,15 +1634,14 @@
 
 
     /**
-     * (A) モーダルから経費アイテムを currentExpenses に追加 (v20, v22, v24 修正)
+     * (A) モーダルから経費アイテムを currentExpenses に追加 (v24 修正)
      */
     function addExpenseItemA() {
       // バリデーション
       var form = document.getElementById('expense-form');
       if (!form.checkValidity()) {
         form.classList.add('was-validated');
-        // (v20) エリア未選択で失敗する場合がある
-        showCustomAlert('必須項目（利用日、経費項目、金額、エリア）を入力してください。'); // (v18 修正)
+        showCustomAlert('必須項目（利用日、経費項目、金額）を入力してください。');
         return;
       }
       form.classList.remove('was-validated');
@@ -1586,33 +1650,31 @@
       var timeSlot = document.getElementById('M-timeSlot').value;
       
       var expense = {
-        // expenseId: (v19) 
         timeSlot: timeSlot,
         useDate: document.getElementById('M-useDate').value,
         itemCode: document.getElementById('M-itemCode').value,
         amount: parseFloat(document.getElementById('M-amount').value) || 0, // 税込 (v24: 隠された input から)
         remarks: document.getElementById('M-remarks').value,
         receiptUrl: document.getElementById('M-receiptUrl').value,
-        areaCode: document.getElementById('M-areaCode').value || '', // v20: 追加
+        areaCode: document.getElementById('M-areaCode').value || '',
         
-        // (v22 新規) 税関連のデータを追加
+        // 税関連のデータを追加
         taxExcludedAmount: parseFloat(document.getElementById('M-amount-excluding-tax').value) || 0, // (v24: 隠された input から)
         taxRate: document.getElementById('M-tax-rate-select').value, // '10', '8', 'custom' など
         taxRateCustom: parseFloat(document.getElementById('M-tax-rate-custom').value) || null // 手入力された数値
       };
       
       if (expenseId) {
-        // (v19 修正) 編集モード
+        // 編集モード
         expense.expenseId = expenseId; // IDを保持
         var index = currentExpenses.findIndex(function(ex) { return ex.expenseId === expenseId; });
         if (index > -1) {
           currentExpenses[index] = expense; // 配列を上書き
         } else {
-          // 念のため (IDがあるのに配列にない場合)
           currentExpenses.push(expense);
         }
       } else {
-        // (v19 修正) 新規モード
+        // 新規モード
         expense.expenseId = 'temp_' + Date.now(); // 新規一時ID
         currentExpenses.push(expense);
       }
@@ -1624,7 +1686,7 @@
     }
     
     /**
-     * (A) (v19 新規) 経費アイテムを削除
+     * (A) 経費アイテムを削除
      */
     function deleteExpenseItemA() {
       var expenseId = document.getElementById('M-expenseId').value;
@@ -1636,7 +1698,7 @@
       }
       
       showCustomAlert('この経費を削除します。よろしいですか？', function() {
-        // (v19) currentExpenses 配列から該当IDを削除
+        // currentExpenses 配列から該当IDを削除
         currentExpenses = currentExpenses.filter(function(ex) {
           return ex.expenseId !== expenseId;
         });
@@ -1649,11 +1711,11 @@
     }
 
     /**
-     * (A) 指定された時間枠の経費バッジを更新 (v17 修正)
+     * (A) 指定された時間枠の経費バッジを更新
      * @param {string} timeSlot "07:00" など
      */
     function updateExpenseBadgeA(timeSlot) {
-      // (v17 修正) GASからマッピングされた 'timeSlot' キーを見る
+      // GASからマッピングされた 'timeSlot' キーを見る
       var count = currentExpenses.filter(function(ex) {
         return ex.timeSlot === timeSlot;
       }).length; 
@@ -1741,18 +1803,18 @@
     }
 
     /**
-     * (A) 日報の保存または申請 (v18 修正: カスタムアラート) (v22: 経費データ)
+     * (A) 日報の保存または申請 (v18 修正: カスタムアラート)
      * @param {'一時保存' | '申請中'} status
      */
     function saveOrSubmitReportA(status) {
       
-      // (v17 修正) 保存直前に走行距離の表示内容を更新する
+      // 保存直前に走行距離の表示内容を更新する
       calculateMileageA();
       
       // バリデーション
       var reportDate = document.getElementById('A-date').value;
       if (!reportDate) {
-        showCustomAlert('日付は必須です。'); // (v18 修正)
+        showCustomAlert('日付は必須です。');
         return;
       }
       
@@ -1761,11 +1823,11 @@
         return act.type;
       });
       if (filledActivities.length === 0) {
-        showCustomAlert('活動内容が1件も入力されていません。'); // (v18 修正)
+        showCustomAlert('活動内容が1件も入力されていません。');
         return;
       }
       
-      // (v18 修正) 確認ダイアログをカスタムモーダルに変更
+      // 確認ダイアログをカスタムモーダルに変更
       var confirmMessage = '「' + status + '」で送信します。よろしいですか？';
       if (status === '申請中') {
          confirmMessage += '\n※申請後は編集できなくなります。';
@@ -1788,26 +1850,23 @@
           mileage: mileage,
         };
 
-        // 2. (v16 修正) 行動明細データを圧縮
+        // 2. 行動明細データを圧縮
         var activityData = compressActivities_(currentActivities);
         
         // 3. 経費明細データ (currentExpenses はそのまま)
-        // (v20: areaCode, v22: tax* も含まれる)
         
         var reportData = {
           header: headerData,
           activities: activityData, // 圧縮済み配列を渡す
-          expenses: currentExpenses // (v20, v22)
+          expenses: currentExpenses
         };
         
-        // console.log("Submitting data:", reportData);
-
         google.script.run
           .withSuccessHandler(function(result) {
             showLoading(false);
             // v11: 詳細エラー表示
             if (result && result.status === 'success') {
-              showCustomAlert(result.message, function() { // (v18 修正)
+              showCustomAlert(result.message, function() {
                 // 成功したらフォームをリセットし、一覧に遷移
                 resetFormA();
                 showView('view-E-my-reports');
@@ -1823,73 +1882,102 @@
     }
 
 
-    // --- (B) 承認待ち一覧機能 -------------------------------------------
+    // --- (B) チェック・承認待ち一覧機能 (v2.9 修正: アコーディオン) ----------------
 
     /**
-     * (B) 承認待ち一覧をロード
+     * (B) チェック・承認待ち一覧をロード (v2.9 修正)
      */
     function loadPendingReportsB() {
-      showLoading(true, '承認待ち一覧を取得中...');
+      showLoading(true, 'チェック・承認待ち一覧を取得中...');
       google.script.run
         .withSuccessHandler(onLoadPendingReportsSuccessB)
         .withFailureHandler(onApiError)
-        .getPendingReports();
+        .getPendingReports(); // (v2.9) { pendingCheck, pendingApproval } が返る
     }
 
     /**
-     * (B) 承認待ち一覧 取得成功 (v17 修正: 日付フォーマット)
-     * @param {Array<object>} reports
+     * (B) 承認待ち一覧 取得成功 (v2.9 修正: アコーディオン描画)
+     * @param {object} data { pendingCheck: [...], pendingApproval: [...] }
      */
-    function onLoadPendingReportsSuccessB(reports) {
+    function onLoadPendingReportsSuccessB(data) {
       showLoading(false);
-      var listBody = document.getElementById('B-approval-list-body');
-      var badge = document.getElementById('approval-count-badge');
-      listBody.innerHTML = '';
       
-      if (!reports || reports.length === 0) { // v7: null check
-        listBody.innerHTML = '<div class="list-group-item">承認待ちの日報はありません。</div>';
-        badge.textContent = '';
-        return;
+      // (v2.9) アコーディオンの各リストを取得
+      var checkBody = document.getElementById('B-approval-list-body-check');
+      var approveBody = document.getElementById('B-approval-list-body-approve');
+      var checkCountEl = document.getElementById('B-count-check');
+      var approveCountEl = document.getElementById('B-count-approve');
+      var totalBadge = document.getElementById('approval-count-badge');
+      
+      checkBody.innerHTML = '';
+      approveBody.innerHTML = '';
+      
+      var reportsCheck = (data && data.pendingCheck) ? data.pendingCheck : [];
+      var reportsApprove = (data && data.pendingApproval) ? data.pendingApproval : [];
+      
+      var totalCount = reportsCheck.length + reportsApprove.length;
+      totalBadge.textContent = totalCount > 0 ? totalCount : '';
+      checkCountEl.textContent = reportsCheck.length;
+      approveCountEl.textContent = reportsApprove.length;
+
+      // 1. 要チェック（申請中）リストの描画
+      if (reportsCheck.length === 0) {
+        checkBody.innerHTML = '<tr><td colspan="4" class="text-center">チェック待ちの日報はありません。</td></tr>';
+      } else {
+        // (v2.9) 日付でソート (昇順)
+        reportsCheck.sort(function(a, b) {
+          return (a['日付'] || '').localeCompare(b['日付'] || '');
+        });
+        
+        reportsCheck.forEach(function(report) {
+          var tr = document.createElement('tr');
+          tr.onclick = function(e) {
+            e.preventDefault();
+            loadReportDetailsC(report['日報ID'], 'view-B-approval-list');
+          };
+          
+          tr.innerHTML = 
+            '<td>' + formatDateWithDay(report['日付'] || '日付不明') + '</td>' +
+            '<td>' + (report['担当者'] || '不明') + '</td>' +
+            '<td><span class="text-danger fw-bold">チェック待ち</span></td>' +
+            '<td>' + formatNumber(report['合計経費'] || 0) + '</td>';
+            
+          checkBody.appendChild(tr);
+        });
       }
-
-      badge.textContent = reports.length;
       
-      // 日付でソート (昇順)
-      reports.sort(function(a, b) {
-        return (a['日付'] || '').localeCompare(b['日付'] || '');
-      });
-
-      reports.forEach(function(report) {
-        // (v17 修正) GASが yyyy/MM/dd を返す
-        var dateStr = report['日付'] || '日付不明';
-        var formattedDate = '';
-        try {
-           // (v17 修正) 曜日だけ取得
-           formattedDate = new Date(dateStr.replace(/\//g, '-')).toLocaleDateString('ja-JP', { weekday: 'short' });
-        } catch(e) {
-           formattedDate = '日付不正';
-        }
+      // 2. 要承認（チェック済）リストの描画
+      if (reportsApprove.length === 0) {
+        approveBody.innerHTML = '<tr><td colspan="4" class="text-center">承認待ちの日報はありません。</td></tr>';
+      } else {
+        // (v2.9) 日付でソート (昇順)
+        reportsApprove.sort(function(a, b) {
+          return (a['日付'] || '').localeCompare(b['日付'] || '');
+        });
         
-        var item = document.createElement('a');
-        item.href = '#';
-        item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center report-list-item';
-        item.onclick = function(e) {
-          e.preventDefault();
-          loadReportDetailsC(report['日報ID'], 'view-B-approval-list');
-        };
-        
-        item.innerHTML = 
-          '<div>' +
-            '<h5 class="mb-1">' + dateStr + ' (' + formattedDate + ')</h5>' + // (v17 修正)
-            '<p class="mb-1">申請者: ' + (report['担当者'] || '不明') + '</p>' +
-            '<small>合計経費: ' + formatNumber(report['合計経費'] || 0) + ' 円</small>' +
-          '</div>' +
-          '<i class="bi bi-chevron-right h4"></i>';
-        listBody.appendChild(item);
-      });
+        reportsApprove.forEach(function(report) {
+          var tr = document.createElement('tr');
+          tr.onclick = function(e) {
+            e.preventDefault();
+            loadReportDetailsC(report['日報ID'], 'view-B-approval-list');
+          };
+          
+          // (v2.9) チェック者情報を表示
+          var checkStatusDisplay = '<span class="text-success fw-bold">チェック済</span>' + 
+                                   '<br><small>(' + (report['チェック者'] || '不明') + ')</small>';
+          
+          tr.innerHTML = 
+            '<td>' + formatDateWithDay(report['日付'] || '日付不明') + '</td>' +
+            '<td>' + (report['担当者'] || '不明') + '</td>' +
+            '<td>' + checkStatusDisplay + '</td>' +
+            '<td>' + formatNumber(report['合計経費'] || 0) + '</td>';
+            
+          approveBody.appendChild(tr);
+        });
+      }
     }
 
-    // --- (C) 日報詳細機能 -----------------------------------------------
+    // --- (C) 日報詳細機能 (v2.9 修正: 領収書ボタン) -------------------------------
 
     /**
      * (C) 日報詳細をロード
@@ -1907,14 +1995,12 @@
     }
     
     /**
-     * (C) 日報詳細 取得成功 (v20, v22 修正: 経費テーブル)
+     * (C) 日報詳細 取得成功 (v2.9 修正: 領収書ボタン)
      * @param {object} data { header, activities, expenses }
      */
     function onLoadReportDetailsSuccessC(data) {
-      // v7: ローディングを先に解除
       showLoading(false);
       
-      // v11 修正: データが不正か、対象が見つからない場合
       if (!data || !data.header || !data.header['日報ID']) {
         console.error('onLoadReportDetailsSuccessC: Invalid data received.', data);
         onApiError('詳細データの取得に失敗しました。データが不正か、対象が見つかりません。');
@@ -1926,32 +2012,32 @@
       var expenses = data.expenses;
       
       // 1. ヘッダー
-      // (v17 修正) GASが yyyy/MM/dd を返す
       document.getElementById('C-header-date').textContent = header['日付'] ? formatDateWithDay(header['日付']) : '日付なし';
       document.getElementById('C-header-applicant').textContent = header['担当者'] || '不明';
-      document.getElementById('C-header-apply-date').textContent = header['申請日'] || 'N/A'; // (v17 修正) yyyy/MM/dd HH:mm:ss
+      document.getElementById('C-header-apply-date').textContent = header['申請日'] ? formatDateTime(header['申請日']) : 'N/A';
       document.getElementById('C-header-mileage').textContent = header['走行距離'] || 0;
       document.getElementById('C-header-total-expense').textContent = formatNumber(header['合計経費'] || 0);
       document.getElementById('C-header-remarks').textContent = header['備考'] || '(備考なし)';
       
-      // v5 修正: 時間合計の表示
       document.getElementById('C-header-movement-time').textContent = formatHours(header['移動時間合計 (時間)']);
       document.getElementById('C-header-meeting-time').textContent = formatHours(header['商談時間合計 (時間)']);
 
       // ステータスバッジ
       var statusBadge = document.getElementById('C-header-status-badge');
-      statusBadge.textContent = header['承認ステータス'];
+      var statusText = header['承認ステータス'];
+      statusBadge.textContent = statusText;
       statusBadge.className = 'badge fs-6'; // reset
-      switch (header['承認ステータス']) {
+      switch (statusText) {
         case '申請中': statusBadge.classList.add('bg-primary'); break;
+        case 'チェック済': statusBadge.classList.add('bg-warning', 'text-dark'); break; // v2.6 新規
         case '承認済': statusBadge.classList.add('bg-success'); break;
         case '差戻し': statusBadge.classList.add('bg-danger'); break;
-        case '一時保存': statusBadge.classList.add('bg-warning', 'text-dark'); break;
+        case '一時保存': statusBadge.classList.add('bg-secondary'); break;
         case '精算申請済': statusBadge.classList.add('bg-info', 'text-dark'); break;
         default: statusBadge.classList.add('bg-secondary');
       }
       
-      // (v18 新規) 差戻し理由の表示
+      // 差戻し理由の表示
       var reasonWrapper = document.getElementById('C-rejection-reason-wrapper');
       var reasonPre = document.getElementById('C-rejection-reason');
       if (header['差戻し理由']) {
@@ -1962,11 +2048,16 @@
         reasonWrapper.style.display = 'none';
       }
       
-      // 2. 行動明細
+      // 2. 承認履歴 (v2.6 新規)
+      document.getElementById('C-history-checker').textContent = header.checker || 'N/A';
+      document.getElementById('C-history-check-date').textContent = header.checkDate ? formatDateTime(header.checkDate) : 'N/A';
+      document.getElementById('C-history-approver').textContent = header.approver || 'N/A';
+      document.getElementById('C-history-approve-date').textContent = header.approveDate ? formatDateTime(header.approveDate) : 'N/A';
+
+      // 3. 行動明細
       var actBody = document.getElementById('C-activities-body');
       actBody.innerHTML = '';
-      if (activities && activities.length > 0) { // v7: null check
-        // 時刻でソート
+      if (activities && activities.length > 0) {
         activities.sort(function(a, b) {
           return (a['開始時刻'] || '').localeCompare(b['開始時刻'] || '');
         });
@@ -1982,27 +2073,26 @@
         actBody.innerHTML = '<tr><td colspan="3">行動明細はありません。</td></tr>';
       }
       
-      // 3. 経費明細 (v22: 税関連の表示)
+      // 4. 経費明細 (v2.9 修正: 領収書ボタン)
       var expBody = document.getElementById('C-expenses-body');
       expBody.innerHTML = '';
-      if (expenses && expenses.length > 0) { // v7: null check
-      
-        // (v20) エリアマスタをMap化
+      if (expenses && expenses.length > 0) {
         var areaMap = {};
-        LODGING_AREAS_MASTER.forEach(function(a) {
-          areaMap[a['地域区分']] = a['地域区分名'];
-        });
+        LODGING_AREAS_MASTER.forEach(function(a) { areaMap[a['地域区分']] = a['地域区分名']; });
       
         expenses.forEach(function(ex) {
-          // (v17 修正) GASが yyyy/MM/dd を返す
-          var useDate = ex.useDate || 'N/A'; // (v17) マッピングされたキー
-          var url = ex.receiptUrl; // (v17) マッピングされたキー
-          var urlLink = url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i></a>' : '';
+          var useDate = ex.useDate || 'N/A';
+          var url = ex.receiptUrl;
           
-          // (v20) エリア名を取得
+          // (v2.9 修正) アイコンリンク -> ボタンに変更
+          var urlLink = url 
+            ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary p-1" style="--bs-btn-padding-y: .1rem; --bs-btn-padding-x: .4rem; --bs-btn-font-size: .75rem;">' +
+                '<i class="bi bi-box-arrow-up-right"></i> 表示' +
+              '</a>' 
+            : '<span class="text-muted" style="font-size: 0.85rem;">添付なし</span>'; // (★修正) URLがなければ「添付なし」
+            
           var areaName = (ex.areaCode && areaMap[ex.areaCode]) ? areaMap[ex.areaCode] : '';
           
-          // (v22) 税率表示
           var taxRateDisplay = 'N/A';
           if (ex.taxRate === 'custom') {
             taxRateDisplay = (ex.taxRateCustom || '0') + '% (手入力)';
@@ -2012,56 +2102,114 @@
             taxRateDisplay = ex.taxRate + '%';
           }
           
-          // (v19 修正) 経費テーブルに「時間帯」列を追加
-          // (v22 修正) 経費テーブルに「税抜」「税率」列を追加
           expBody.innerHTML += 
             '<tr>' +
-              '<td>' + (ex.timeSlot || 'N/A') + '</td>' + // (v19 追加)
+              '<td>' + (ex.timeSlot || 'N/A') + '</td>' +
               '<td>' + useDate + '</td>' +
               '<td>' + (ex.itemName || '不明な項目') + '</td>' +
-              '<td>' + formatNumber(ex.amount || 0) + '</td>' + // (v17) 税込金額
-              '<td>' + areaName + '</td>' + // (v20) エリア名
-              // --- (v22) 税関連 ---
-              '<td>' + formatNumber(ex.taxExcludedAmount || 0) + '</td>' + // 税抜金額
-              '<td>' + taxRateDisplay + '</td>' + // 税率
-              // ---
-              '<td>' + (ex.remarks || '') + '</td>' + // (v17) マッピングされたキー
-              '<td>' + urlLink + '</td>' +
+              '<td>' + formatNumber(ex.amount || 0) + '</td>' +
+              '<td>' + areaName + '</td>' +
+              '<td>' + formatNumber(ex.taxExcludedAmount || 0) + '</td>' +
+              '<td>' + taxRateDisplay + '</td>' +
+              '<td>' + (ex.remarks || '') + '</td>' +
+              '<td>' + urlLink + '</td>' + // (v2.9 修正)
             '</tr>';
         });
       } else {
-        expBody.innerHTML = '<tr><td colspan="9">経費明細はありません。</td></tr>'; // (v22 修正) colspan="7" -> 9
+        expBody.innerHTML = '<tr><td colspan="9">経費明細はありません。</td></tr>';
       }
       
-      // 4. 承認ボタンの制御
-      var approvalButtons = document.getElementById('C-approval-buttons');
-      // 管理者 かつ ステータスが "申請中" かつ 戻り先が "承認待ち" の場合のみ表示
-      if (IS_MANAGER && header['承認ステータス'] === '申請中' && viewC_ReturnView === 'view-B-approval-list') {
-        document.getElementById('C-reportId').value = header['日報ID'];
-        approvalButtons.style.display = 'block';
-      } else {
-        approvalButtons.style.display = 'none';
+      // 5. 承認ボタンの制御 (v2.6 修正: 権限とステータスで出し分け)
+      var approvalButtonsWrapper = document.getElementById('C-approval-buttons');
+      approvalButtonsWrapper.style.display = 'none';
+      document.getElementById('C-reportId').value = header['日報ID'];
+      // approvalButtonsWrapper.innerHTML = ''; // ボタンをクリア
+      
+      // (★修正) 既存のボタン（<button>要素）だけを削除し、IDを持つinputは残す
+      approvalButtonsWrapper.querySelectorAll('button').forEach(function(btn) {
+        btn.remove();
+      });
+
+      var buttonsHtml = '';
+      
+      // チェッカーが「申請中」のものを見る場合
+      if (IS_CHECKER && statusText === '申請中' && viewC_ReturnView === 'view-B-approval-list') {
+        buttonsHtml += 
+          '<button class="btn btn-danger btn-lg" onclick="handleRejectC()">' +
+            '<i class="bi bi-x-circle"></i> 差戻し' +
+          '</button>' +
+          '<button class="btn btn-success btn-lg ms-3" onclick="handleCheckC()">' + // v2.6: 新設
+            '<i class="bi bi-check-circle"></i> チェック完了' +
+          '</button>';
+      } 
+      // 承認者が「チェック済」のものを見る場合
+      else if (IS_APPROVER && statusText === 'チェック済' && viewC_ReturnView === 'view-B-approval-list') {
+        buttonsHtml += 
+          '<button class="btn btn-danger btn-lg" onclick="handleRejectC()">' +
+            '<i class="bi bi-x-circle"></i> 差戻し' +
+          '</button>' +
+          '<button class="btn btn-success btn-lg ms-3" onclick="handleApproveC()">' +
+            '<i class="bi bi-check-circle"></i> 承認する' +
+          '</button>';
+      }
+      // (★修正) 承認者が「申請中」のものを見るロジックを削除
+      /*
+      // 承認者が「申請中」のものを見る場合（承認者も差戻し可能）
+      else if (IS_APPROVER && statusText === '申請中' && viewC_ReturnView === 'view-B-approval-list') {
+          buttonsHtml += 
+          '<button class="btn btn-danger btn-lg" onclick="handleRejectC()">' +
+              '<i class="bi bi-x-circle"></i> 差戻し' +
+          '</button>';
+      }
+      */
+
+      if (buttonsHtml) {
+        // (★修正) innerHTML で上書きするのではなく、HTMLを追記する
+        approvalButtonsWrapper.insertAdjacentHTML('beforeend', buttonsHtml);
+        approvalButtonsWrapper.style.display = 'block';
       }
       
       // (C)ビューに遷移
-      // showLoading(false); // v7: 先頭に移動
       showView('view-C-report-detail');
+    }
+    
+    /**
+     * (C) チェック処理 (v2.6 新規)
+     */
+    function handleCheckC() {
+      var reportId = document.getElementById('C-reportId').value;
+      if (!reportId) return;
+      
+      // (★修正) メール通知に関する文言を削除
+      showCustomAlert('この日報を「チェック済」にします。よろしいですか？', function() {
+        showLoading(true, 'チェック処理中...');
+        google.script.run
+          .withSuccessHandler(function(result) {
+            showLoading(false);
+            showCustomAlert(result.message, function() {
+              // 承認待ち一覧 (B) に戻る
+              showView('view-B-approval-list');
+            });
+          })
+          .withFailureHandler(onApiError)
+          .checkReport(reportId); // v2.6: 新設関数
+      });
     }
 
     /**
-     * (C) 承認処理 (v18 修正: カスタムアラート)
+     * (C) 承認処理
      */
     function handleApproveC() {
       var reportId = document.getElementById('C-reportId').value;
       if (!reportId) return;
       
-      showCustomAlert('この日報を「承認」します。よろしいですか？', function() { // (v18 修正)
+      showCustomAlert('この日報を「承認済」にします。よろしいですか？', function() {
         // OK後の処理
         showLoading(true, '承認処理中...');
         google.script.run
           .withSuccessHandler(function(result) {
             showLoading(false);
-            showCustomAlert(result.message, function() { // (v18 修正)
+            showCustomAlert(result.message, function() {
               // 承認待ち一覧 (B) に戻る
               showView('view-B-approval-list');
             });
@@ -2072,17 +2220,15 @@
     }
     
     /**
-     * (C) 差戻し処理 (v18 修正: カスタムプロンプト)
+     * (C) 差戻し処理
      */
     function handleRejectC() {
       var reportId = document.getElementById('C-reportId').value;
       if (!reportId) return;
       
-      // (v18 修正) カスタムプロンプトを使用
+      // カスタムプロンプトを使用
       showCustomPrompt('差戻し理由を入力してください（必須）:', function(reason) {
         if (!reason) {
-          // showCustomAlert("差戻し理由が入力されていないため、処理を中断しました。");
-          // (v18) キャンセルの場合はアラート不要
           return;
         }
         
@@ -2091,13 +2237,13 @@
         google.script.run
           .withSuccessHandler(function(result) {
             showLoading(false);
-            showCustomAlert(result.message, function() { // (v18 修正)
+            showCustomAlert(result.message, function() {
               // 承認待ち一覧 (B) に戻る
               showView('view-B-approval-list');
             });
           })
           .withFailureHandler(onApiError)
-          .rejectReport(reportId, reason); // (v15 修正) 理由を渡す
+          .rejectReport(reportId, reason);
       });
     }
 
@@ -2115,7 +2261,7 @@
     }
     
     /**
-     * (D) 承認済み経費 取得成功 (v17 修正: 日付フォーマット) (v22: 経費項目)
+     * (D) 承認済み経費 取得成功
      * @param {object} data { reports: [], expenses: [] }
      */
     function onLoadApprovedExpensesSuccessD(data) {
@@ -2123,8 +2269,8 @@
       var tbody = document.getElementById('D-expense-list-body');
       tbody.innerHTML = '';
       
-      var reports = (data && data.reports) ? data.reports : []; // v7: null check
-      var expenses = (data && data.expenses) ? data.expenses : []; // v7: null check
+      var reports = (data && data.reports) ? data.reports : [];
+      var expenses = (data && data.expenses) ? data.expenses : [];
       
       if (reports.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center">精算対象の「承認済」日報はありません。</td></tr>';
@@ -2137,14 +2283,13 @@
         return (a['日付'] || '').localeCompare(b['日付'] || '');
       });
 
-      // v5 修正: 経費データをレポートIDで集計
+      // 経費データをレポートIDで集計
       var expensesMap = {};
       expenses.forEach(function(ex) {
         var rId = ex['日報ID'];
         if (!expensesMap[rId]) {
           expensesMap[rId] = [];
         }
-        // (v22) ex.itemName (マージ済み) を使用, ex['金額'] (税込) を使用
         expensesMap[rId].push(ex.itemName + ': ' + formatNumber(ex['金額']) + '円');
       });
 
@@ -2152,7 +2297,7 @@
         var tr = document.createElement('tr');
         var reportId = report['日報ID'];
         var totalExpense = parseFloat(report['合計経費']) || 0;
-        var date = report['日付']; // (v17 修正) GASが yyyy/MM/dd を返す
+        var date = report['日付'];
         
         // 経費詳細の文字列
         var expenseDetails = (expensesMap[reportId] || []).join('<br>');
@@ -2167,7 +2312,7 @@
           '<td>' + date + '</td>' +
           '<td>' + formatNumber(totalExpense) + '</td>' +
           '<td><small>' + (expenseDetails || '(経費なし)') + '</small></td>' +
-          '<td><small>' + String(reportId).substring(0, 8) + '...</small></td>'; // v7: String()
+          '<td><small>' + String(reportId).substring(0, 8) + '...</small></td>';
         tbody.appendChild(tr);
       });
       
@@ -2196,7 +2341,7 @@
     }
     
     /**
-     * (D) 最終精算申請を送信 (v18 修正: カスタムアラート)
+     * (D) 最終精算申請を送信
      */
     function submitFinalExpensesD() {
       var selectedIds = [];
@@ -2205,18 +2350,18 @@
       });
       
       if (selectedIds.length === 0) {
-        showCustomAlert('精算申請する日報を選択してください。'); // (v18 修正)
+        showCustomAlert('精算申請する日報を選択してください。');
         return;
       }
       
       var confirmMessage = '選択した ' + selectedIds.length + ' 件の日報を経理に精算申請します。\nよろしいですか？';
-      showCustomAlert(confirmMessage, function() { // (v18 修正)
+      showCustomAlert(confirmMessage, function() {
         // OK後の処理
         showLoading(true, '精算申請を送信中...');
         google.script.run
           .withSuccessHandler(function(result) {
             showLoading(false);
-            showCustomAlert(result.message, function() { // (v18 修正)
+            showCustomAlert(result.message, function() {
               // 成功したら一覧をリロード
               loadApprovedExpensesD();
             });
@@ -2226,7 +2371,7 @@
       });
     }
 
-    // --- (E) 日報一覧機能 ----------------------------------------------
+    // --- (E) 日報一覧機能 (v2.5.2 修正: グルーピング表示) ---------------------
 
     /**
      * (E) 自分の日報一覧をロード (タイムアウト対策版)
@@ -2240,7 +2385,7 @@
     }
 
     /**
-     * (E) 日報一覧 取得成功 (v17 修正: 日付フォーマット)
+     * (E) 日報一覧 取得成功 (v2.5.2 修正: グルーピング表示)
      * @param {Array<object>} reports
      */
     function onLoadMyReportsSuccessE(reports) {
@@ -2253,24 +2398,35 @@
         return;
       }
       
+      var currentStatus = '';
+      
       reports.forEach(function(report) {
-        var tr = document.createElement('tr');
-        var rId = report['日報ID']; // v5: report.reportId -> report['日報ID']
-        var status = report['承認ステータス']; // v5
+        var rId = report['日報ID'];
+        var status = report['承認ステータス'];
+        
+        // ステータスが変わったらグループヘッダーを追加
+        if (status !== currentStatus) {
+          currentStatus = status;
+          var headerRow = document.createElement('tr');
+          headerRow.className = 'table-group-divider table-light';
+          headerRow.innerHTML = '<td colspan="5" class="fw-bold text-center p-2">' + status + '</td>';
+          tbody.appendChild(headerRow);
+        }
         
         var statusBadge = '';
-        switch (status) { // v5: report.status -> status
+        switch (status) {
           case '申請中': statusBadge = '<span class="badge bg-primary">申請中</span>'; break;
+          case 'チェック済': statusBadge = '<span class="badge bg-warning text-dark">チェック済</span>'; break; // v2.6: 新設
           case '承認済': statusBadge = '<span class="badge bg-success">承認済</span>'; break;
           case '差戻し': statusBadge = '<span class="badge bg-danger">差戻し</span>'; break;
-          case '一時保存': statusBadge = '<span class="badge bg-warning text-dark">一時保存</span>'; break;
+          case '一時保存': statusBadge = '<span class="badge bg-secondary">一時保存</span>'; break;
           case '精算申請済': statusBadge = '<span class="badge bg-info text-dark">精算申請済</span>'; break;
           default: statusBadge = '<span class="badge bg-secondary">' + status + '</span>';
         }
 
         // 編集/表示ボタンの出し分け
         var buttons = '';
-        if (status === '一時保存' || status === '差戻し') { // v5: report.status -> status
+        if (status === '一時保存' || status === '差戻し') {
           // 編集可能
           buttons = '<button class="btn btn-sm btn-primary" onclick="handleEditReportE(\'' + rId + '\')"><i class="bi bi-pencil"></i> 編集</button>';
         } else {
@@ -2278,11 +2434,12 @@
           buttons = '<button class="btn btn-sm btn-outline-secondary" onclick="loadReportDetailsC(\'' + rId + '\', \'view-E-my-reports\')"><i class="bi bi-eye"></i> 表示</button>';
         }
         
+        var tr = document.createElement('tr');
         tr.innerHTML = 
-          '<td>' + (report['日付'] || '') + '</td>' + // (v17 修正) GASが yyyy/MM/dd を返す
+          '<td>' + (report['日付'] || '') + '</td>' +
           '<td>' + statusBadge + '</td>' +
-          '<td>' + formatNumber(report['合計経費']) + '</td>' + // v5
-          '<td><small>' + (report['備考'] || '') + '</small></td>' + // v5
+          '<td>' + formatNumber(report['合計経費']) + '</td>' +
+          '<td><small>' + (report['備考'] || '') + '</small></td>' +
           '<td>' + buttons + '</td>';
         
         // 編集ボタン以外がクリックされたら詳細表示 (イベント伝播停止)
@@ -2297,10 +2454,10 @@
     }
     
     /**
-     * (E) 編集ボタンクリック時の処理 (v18 修正: カスタムアラート)
+     * (E) 編集ボタンクリック時の処理
      */
     function handleEditReportE(reportId) {
-      showCustomAlert('この日報データを編集します。入力中の内容は破棄されますが、よろしいですか？', function() { // (v18 修正)
+      showCustomAlert('この日報データを編集します。入力中の内容は破棄されますが、よろしいですか？', function() {
         // OK後の処理
         showLoading(true, '編集データを読み込み中...');
         google.script.run
@@ -2311,74 +2468,64 @@
     }
     
     /**
-     * (A) 編集データの読み込み成功 (E -> A) (v20 修正: 経費読み込み) (v22: 税項目)
+     * (A) 編集データの読み込み成功 (E -> A) (v22: 税項目)
      * @param {object} result { status, data, message }
      */
     function onLoadReportForEditSuccessA(result) {
       showLoading(false);
 
-      if (!result) {
-        console.error('onLoadReportForEditSuccessA: Failed to load data. Result is null.');
-        onApiError('編集データの読み込みに失敗しました。(result: null)');
+      if (!result || result.status !== 'success' || !result.data || !result.data.header || !result.data.header['日報ID']) {
+        var errorMsg = (result && result.message) ? result.message : '編集データの読み込みに失敗しました。';
+        console.error('onLoadReportForEditSuccessA: Failed to load data.', result);
+        onApiError(errorMsg);
         return;
       }
       
-      if (result.status === 'success' && result.data && result.data.header && result.data.header['日報ID']) {
-        var data = result.data;
-        var h = data.header;
-        
-        // 1. フォーム(A)をリセット (v18: この中で経費バッジがクリアされる)
-        resetFormA();
-        
-        // 2. (v16 修正) 展開済みの activities オブジェクトをセット
-        currentActivities = data.activities || {};
-        currentExpenses = data.expenses || []; // (v20: areaCode, v22: tax* も含まれる)
+      var data = result.data;
+      var h = data.header;
+      
+      // 1. フォーム(A)をリセット
+      resetFormA();
+      
+      // 2. 展開済みの activities オブジェクトと expenses をセット
+      currentActivities = data.activities || {};
+      currentExpenses = data.expenses || [];
 
-        // 3. (v14 修正) タイムシートを描画 (v18: バッジ更新はしない)
-        renderTimesheetA();
-        
-        // (v18 修正) currentExpenses をセットした *後* でバッジを更新
-        updateAllExpenseBadgesA();
-        
-        // 4. (v14 修正) 最後にヘッダー情報をフォームにセット
-        document.getElementById('A-reportId').value = h['日報ID'] || '';
-        // (v17 修正) GASが yyyy/MM/dd を返すため、input[type=date]用に yyyy-MM-dd に変換
-        document.getElementById('A-date').value = h['日付'] ? h['日付'].replace(/\//g, '-') : getTodayString();
-        document.getElementById('A-remarks').value = h['備考'] || '';
-        document.getElementById('A-startMeter').value = h['始時メーター'] || '';
-        document.getElementById('A-endMeter').value = h['終時メーター'] || '';
-        
-        // (v15 修正) 差戻し理由を表示
-        var reasonDiv = document.getElementById('A-rejection-reason');
-        if (h['差戻し理由']) { // v15: 「差戻し理由」列がスプレッドシートにあれば
-          reasonDiv.textContent = '差戻し理由: ' + h['差戻し理由'];
-          reasonDiv.style.display = 'block';
-        } else {
-          reasonDiv.style.display = 'none';
-        }
-        
-        // 走行距離を再計算
-        calculateMileageA();
-        
-        // (v15 修正) 時間合計を再計算
-        calculateTotalsA();
-
-        // 6. (A)画面に遷移
-        showView('view-A-daily-report');
-
+      // 3. タイムシートを描画し、バッジを更新
+      renderTimesheetA();
+      updateAllExpenseBadgesA();
+      
+      // 4. ヘッダー情報をフォームにセット
+      document.getElementById('A-reportId').value = h['日報ID'] || '';
+      // GASが yyyy/MM/dd を返すため、input[type=date]用に yyyy-MM-dd に変換
+      document.getElementById('A-date').value = h['日付'] ? h['日付'].replace(/\//g, '-') : getTodayString();
+      document.getElementById('A-remarks').value = h['備考'] || '';
+      document.getElementById('A-startMeter').value = h['始時メーター'] || '';
+      document.getElementById('A-endMeter').value = h['終時メーター'] || '';
+      
+      // 差戻し理由を表示
+      var reasonDiv = document.getElementById('A-rejection-reason');
+      if (h['差戻し理由']) {
+        reasonDiv.textContent = '差戻し理由: ' + h['差戻し理由'];
+        reasonDiv.style.display = 'block';
       } else {
-        // 失敗
-        var errorMsg = (result && result.message) ? result.message : '編集データの読み込みに失敗しました。(status: ' + (result.status || 'unknown') + ')';
-        console.error('onLoadReportForEditSuccessA: Failed to load data.', result);
-        onApiError(errorMsg); // (v18 修正)
+        reasonDiv.style.display = 'none';
       }
+      
+      // 走行距離を再計算
+      calculateMileageA();
+      
+      // 時間合計を再計算
+      calculateTotalsA();
+
+      // 6. (A)画面に遷移
+      showView('view-A-daily-report');
     }
     
     // --- (v22 新規) 税計算 & カンマ表示 --------------------------------
-    // (v24 修正: カンマ入力対応)
     
     /**
-     * (A) (新規) 消費税率の「その他」手入力欄の表示/非表示を切り替える
+     * (A) 消費税率の「その他」手入力欄の表示/非表示を切り替える
      */
     function toggleCustomTaxRateA() {
       var select = document.getElementById('M-tax-rate-select');
@@ -2392,7 +2539,7 @@
     }
 
     /**
-     * (A) (新規) 現在選択されている税率 (数値) を取得する
+     * (A) 現在選択されている税率 (数値) を取得する
      * @returns {number | null} 税率 (10, 8, 0 など)。未選択時は null。
      */
     function getSelectedTaxRateA() {
@@ -2409,8 +2556,7 @@
     }
 
     /**
-     * (A) (新規) 消費税の自動計算を実行する
-     * (v24 変更: カンマ入力(hidden input)を読み書きするよう修正)
+     * (A) 消費税の自動計算を実行する
      * @param {Event} e イベントオブジェクト (どの要素が変更されたかを知るため)
      */
     function handleTaxCalculationA(e) {
@@ -2419,7 +2565,7 @@
       
       var lastChangedId = e.target.id;
       
-      // (v24 変更) 隠された number input を参照
+      // 隠された number input を参照
       var taxIncludedInput = document.getElementById('M-amount');
       var taxExcludedInput = document.getElementById('M-amount-excluding-tax');
       
@@ -2431,66 +2577,50 @@
       if (lastChangedId === 'M-tax-rate-select' || lastChangedId === 'M-tax-rate-custom') {
         if (taxRate === null) {
            // 税率が 'auto' に戻されたら、税抜をクリアする
-           // (v24 変更) カンマ入力更新用の関数を使用
            updateKanmaInputA('M-amount-excluding-tax', '');
         } else {
           // 税率が変更されたら、「税込」を基準に「税抜」を再計算する
           if (taxIncluded > 0) {
-            // (v24 変更) カンマ入力更新用の関数を使用
             var newTaxExcluded = (taxRate > 0) ? Math.ceil(taxIncluded / (1 + taxRate / 100)) : taxIncluded;
             updateKanmaInputA('M-amount-excluding-tax', newTaxExcluded);
           }
           // 税込が0なら、「税抜」を基準に「税込」を再計算
           else if (taxExcluded > 0) {
-            // (v24 変更) カンマ入力更新用の関数を使用
             var newTaxIncluded = Math.round(taxExcluded * (1 + taxRate / 100));
             updateKanmaInputA('M-amount', newTaxIncluded);
           }
         }
       }
-      // 2. 税抜金額が変更された場合 (v24: 隠された input がトリガー)
+      // 2. 税抜金額が変更された場合
       else if (lastChangedId === 'M-amount-excluding-tax') {
         if (taxRate !== null) {
           // 税抜と税率 -> 税込 を計算
-          // (v24 変更) カンマ入力更新用の関数を使用
           var newTaxIncluded = Math.round(taxExcluded * (1 + taxRate / 100));
           updateKanmaInputA('M-amount', newTaxIncluded);
         }
       }
-      // 3. 税込金額が変更された場合 (v24: 隠された input がトリガー)
+      // 3. 税込金額が変更された場合
       else if (lastChangedId === 'M-amount') {
         if (taxRate !== null) {
           // 税込と税率 -> 税抜 を計算
-          // (v24 変更) カンマ入力更新用の関数を使用
           var newTaxExcluded = (taxRate > 0) ? Math.ceil(taxIncluded / (1 + taxRate / 100)) : taxIncluded;
           updateKanmaInputA('M-amount-excluding-tax', newTaxExcluded);
         } else {
           // 税率未選択で税込が入力されたら、税抜はクリア
-          // (v24 変更) カンマ入力更新用の関数を使用
           updateKanmaInputA('M-amount-excluding-tax', '');
         }
       }
       
-      // カンマ区切り表示を更新 (v23: 削除 -> v24: カンマ入力欄の更新は input イベント内で実行される)
-      // updateAmountDisplayA('M-amount');
-      
-      // (v22) 税込金額が変更されたら、上限チェックも実行
+      // 税込金額が変更されたら、上限チェックも実行
       if (lastChangedId === 'M-amount') {
         checkExpenseLimitA();
       }
     }
     
-    /**
-     * (A) (v23: 削除) 金額入力欄のカンマ区切り表示を更新する
-     */
-    /*
-    function updateAmountDisplayA(inputId) { ... }
-    */
-
     // --- (v24 新規) カンマ入力フォーマット --------------------------------
     
     /**
-     * (A) (v24 新規) カンマ入力欄のイベントリスナーを初期化
+     * (A) カンマ入力欄のイベントリスナーを初期化
      */
     function initializeKanmaInputsA() {
       document.getElementById('M-amount-display-input').addEventListener('input', formatKanmaInputA);
@@ -2498,7 +2628,7 @@
     }
     
     /**
-     * (A) (v24 新規) カンマ入力欄のフォーマット処理
+     * (A) カンマ入力欄のフォーマット処理
      */
     function formatKanmaInputA(e) {
       var displayInput = e.target;
@@ -2517,13 +2647,11 @@
       displayInput.value = numericValue > 0 ? numericValue.toLocaleString() : (numericValueStr === '0' ? '0' : '');
       
       // 4. 隠された input の 'input' イベントを発火させ、税計算や上限チェックをトリガー
-      // (※ 'change' ではなく 'input' イベント)
       hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
     
     /**
-     * (A) (v24 新規) 隠された input とカンマ表示 input の両方をプログラムから更新する
-     * (税計算、規定額セット、編集データ読み込み時に使用)
+     * (A) 隠された input とカンマ表示 input の両方をプログラムから更新する
      * @param {string} hiddenInputId 'M-amount' または 'M-amount-excluding-tax'
      * @param {number | string} numericValue セットする数値
      */
@@ -2540,21 +2668,9 @@
       
       // 2. 表示 input にカンマ区切りをセット
       displayInput.value = num > 0 ? num.toLocaleString() : '';
-      
-      // 3. (v24) 隠された input の 'input' イベントを発火 (税計算/上限チェックのため)
-      // ただし、この関数自身が税計算 (handleTaxCalculationA) から呼ばれると無限ループになるため、
-      // handleTaxCalculationA 側ではこの関数を呼ばないようにするか、フラグ制御が必要。
-      // → handleTaxCalculationA が 'M-amount' を *読み取る* 前に 'M-amount-excluding-tax' を *書き込む* ことがあるため、
-      //   ここでイベントを発火させると計算が狂う可能性がある。
-      // → 対策: handleTaxCalculationA は最後に *一回だけ* 関連する input (M-amount) の
-      //   イベントを発火させるか、または計算ロジック内で完結させる。
-      
-      // (v24) handleTaxCalculationA 内での updateKanmaInputA 呼び出しは、
-      // イベント発火を伴わない「値の更新」に留める。
-      // formatKanmaInputA (ユーザー入力時) のみがイベントを発火させる。
     }
 
-
   </script>
+
 </body>
 </html>
