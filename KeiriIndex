@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>経理用 支払処理アプリ</title> <!-- (vOmatome 修正) 用語変更 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        .app-view { display: none; }
+        .app-view.active { display: block; }
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.6); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .text-break-word { word-break: break-all; }
+        .table-hover tbody tr { cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <!-- 読み込み中オーバーレイ -->
+    <div id="loading-overlay" style="display: none;">
+        <div class="text-center text-white">
+            <div class="spinner-border mb-3" role="status"></div>
+            <p id="loading-text">処理中...</p>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <div class="container-fluid p-3 p-md-4">
+        <h3 class="mb-4">
+            <i class="bi bi-cash-stack"></i> 経理用 支払処理アプリ <!-- (vOmatome 修正) 用語変更 -->
+            <span class="badge bg-secondary ms-3 fs-6" id="user-info-display"></span>
+        </h3>
+
+        <!-- 権限エラー表示 -->
+        <? if (!isAccountant) { ?>
+            <div id="view-error" class="app-view active">
+                <div class="alert alert-danger" role="alert">
+                    <i class="bi bi-x-octagon-fill"></i> このページにアクセスする権限がありません。
+                </div>
+            </div>
+        <? } else { ?>
+            <!-- メインビュー -->
+            <div id="view-main" class="app-view active">
+                
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">支払待ち申請一覧</h5> <!-- (vOmatome 修正) 用語変更 -->
+                        <div>
+                            <button class="btn btn-sm btn-info text-white me-2" onclick="handleSyncData()">
+                                <i class="bi bi-arrow-clockwise"></i> 最新の申請データを取得
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="exportData()">
+                                <i class="bi bi-file-earmark-spreadsheet"></i> CSVエクスポート
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 id="pending-count"></h6>
+                            <div>
+                                <input class="form-check-input" type="checkbox" id="check-all" onchange="toggleAll(this.checked)">
+                                <label class="form-check-label" for="check-all">全選択</label>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 40px;">選択</th>
+                                        <th>日付</th>
+                                        <th>システム</th>
+                                        <th>申請者</th>
+                                        <th>件名 / ID</th>
+                                        <th>金額 (円)</th>
+                                        <th>詳細</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pending-list-body">
+                                    <tr><td colspan="7" class="text-center p-5">「最新の申請データを取得」ボタンを押してください。</td></tr>
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="5" class="text-end fw-bold">選択合計</td>
+                                        <td colspan="2" class="fw-bold text-danger fs-5" id="total-selected-amount">0 円</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card-footer text-center">
+                        <button class="btn btn-danger btn-lg me-3" onclick="handleBulkReject()">
+                            <i class="bi bi-x-circle"></i> 選択した申請を差し戻し
+                        </button>
+                        <button class="btn btn-primary btn-lg" onclick="handleBulkProcess()">
+                            <i class="bi bi-check-circle"></i> 選択した申請を支払済にする <!-- (vOmatome 修正) 用語変更 -->
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        <? } ?>
+    </div> <!-- /container -->
+
+    <!-- モーダル: 申請詳細 -->
+    <div class="modal fade" id="reportDetailModal" tabindex="-1" aria-labelledby="reportDetailModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="reportDetailModalLabel"><i class="bi bi-file-earmark-text"></i> 申請詳細</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>経理処理ID:</strong> <span id="detailKeiriId" class="text-break-word"></span></p>
+                    <div class="row mb-3">
+                        <div class="col-md-6"><strong>システム区分:</strong> <span id="detailSystemType"></span></div>
+                        <div class="col-md-6"><strong>申請者:</strong> <span id="detailApplicant"></span></div>
+                        <div class="col-md-6"><strong>申請日:</strong> <span id="detailApplyDate"></span></div>
+                        <div class="col-md-6"><strong>合計金額:</strong> <span id="detailTotalAmount" class="text-danger fw-bold"></span> 円</div>
+                        <div class="col-12 mt-2"><strong>件名:</strong> <span id="detailSubject"></span></div>
+                    </div>
+
+                    <h6 class="mt-4">経費明細</h6>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-sm">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>利用日</th>
+                                    <th>経費項目名</th>
+                                    <th>金額(税込)</th>
+                                    <th>エリア</th>
+                                    <th>備考</th>
+                                    <th style="width: 80px;">領収書</th> <!-- 新しい列 -->
+                                </tr>
+                            </thead>
+                            <tbody id="reportDetailsBody">
+                                <!-- JSで明細を挿入 -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div id="rejection-comment-area" style="display:none;" class="alert alert-warning mt-3">
+                        <strong><i class="bi bi-arrow-return-left"></i> 過去の差し戻しコメント:</strong>
+                        <pre id="rejectionComment" class="mb-0"></pre>
+                    </div>
+                    
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    <button type="button" class="btn btn-danger" id="detailRejectBtn">
+                        <i class="bi bi-x-circle"></i> 差し戻し
+                    </button>
+                    <button type="button" class="btn btn-primary" id="detailProcessBtn">
+                        <i class="bi bi-check-circle"></i> 支払済にする <!-- (vOmatome 修正) 用語変更 -->
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- モーダル: 差し戻し理由入力 -->
+    <div class="modal fade" id="rejectModal" tabindex="-1" aria-labelledby="rejectModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="rejectModalLabel">差し戻し理由入力</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-danger">差し戻しコメントは元の申請者に見えます。</p>
+                    <textarea class="form-control" id="rejectReason" rows="4" placeholder="具体的な理由を記入してください（例：領収書の日付が申請日と異なります）"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-danger" id="confirmRejectBtn">
+                        <i class="bi bi-x-circle"></i> 差し戻しを実行
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS & カスタムスクリプト -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // --- グローバル変数 ---
+        var USER_NAME = '<?= userName ?>'; // GASから渡されるユーザー名
+        var pendingData = []; // 支払待ちヘッダーデータ全体を保持
+        var detailDataMap = {}; // 明細データをKeiriShoriIDで保持
+        var currentKeiriId = null; // 現在モーダルで開いているID
+        
+        // モーダルインスタンス
+        var detailModal;
+        var rejectModal;
+
+        // --- 初期化 ---
+        document.addEventListener('DOMContentLoaded', function() {
+            // ユーザー名表示
+            document.getElementById('user-info-display').textContent = USER_NAME + ' (' + (<?= isAccountant ?> ? '経理' : '閲覧者') + ')';
+            
+            // モーダル初期化
+            detailModal = new bootstrap.Modal(document.getElementById('reportDetailModal'));
+            rejectModal = new bootstrap.Modal(document.getElementById('rejectModal'));
+
+            // イベントリスナー設定
+            document.getElementById('check-all').addEventListener('change', function(e) {
+                toggleAll(e.target.checked);
+            });
+            document.getElementById('pending-list-body').addEventListener('change', function(e) {
+                if (e.target.type === 'checkbox') updateTotalSelectedAmount();
+            });
+
+            // 詳細モーダルのボタンイベント
+            document.getElementById('detailProcessBtn').addEventListener('click', function() {
+                handleProcess(currentKeiriId);
+                detailModal.hide();
+            });
+            document.getElementById('detailRejectBtn').addEventListener('click', function() {
+                openRejectModal(currentKeiriId);
+            });
+
+            // 差し戻しモーダルの確定ボタンイベント
+            document.getElementById('confirmRejectBtn').addEventListener('click', function() {
+                confirmReject();
+            });
+            
+            // 初期データロード
+            loadPendingData();
+        });
+
+        // --- 汎用関数 ---
+        function showLoading(show, text) {
+            var overlay = document.getElementById('loading-overlay');
+            document.getElementById('loading-text').textContent = text || '処理中...';
+            overlay.style.display = show ? 'flex' : 'none';
+        }
+
+        function showCustomAlert(message, isError) {
+            alert(message); // シンプルなアラートで代用
+        }
+
+        function formatNumber(num) {
+            return (parseFloat(num) || 0).toLocaleString('ja-JP');
+        }
+
+        // --- データ同期 & 表示 ---
+        
+        /**
+         * 最新の申請データを同期する
+         */
+        function handleSyncData() {
+            showLoading(true, '最新データを同期中...');
+            google.script.run
+                .withSuccessHandler(function(result) {
+                    showLoading(false);
+                    if (result.status === 'success') {
+                        showCustomAlert(result.message, false);
+                        loadPendingData(); // 同期後、一覧をリロード
+                    } else {
+                        showCustomAlert(result.message, true);
+                    }
+                })
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    showCustomAlert('同期中にGASエラーが発生しました: ' + error.message, true);
+                })
+                .syncDataFromSources();
+        }
+
+        /**
+         * 支払待ちデータをロードし、画面に表示する
+         */
+        function loadPendingData() {
+            showLoading(true, '支払待ちデータを取得中...'); // (vOmatome 修正)
+            google.script.run
+                .withSuccessHandler(onLoadPendingDataSuccess)
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    showCustomAlert('一覧取得中にエラーが発生しました: ' + error.message, true);
+                    document.getElementById('pending-list-body').innerHTML = '<tr><td colspan="7" class="text-center p-5 text-danger">' + error.message + '</td></tr>';
+                })
+                .loadPendingHeaders();
+        }
+
+        /**
+         * ロード成功時のコールバック
+         */
+        function onLoadPendingDataSuccess(result) {
+            showLoading(false);
+            if (result.status === 'error') {
+                showCustomAlert(result.message, true);
+                return;
+            }
+
+            pendingData = result.data || [];
+            var tbody = document.getElementById('pending-list-body');
+            tbody.innerHTML = '';
+            
+            if (pendingData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center p-5">現在、支払待ちの申請はありません。</td></tr>'; // (vOmatome 修正)
+                document.getElementById('pending-count').textContent = '0 件';
+                updateTotalSelectedAmount();
+                return;
+            }
+            
+            // 日付の昇順でソート (申請日が文字列として保存されていると仮定)
+            pendingData.sort((a, b) => (a['申請日'] || '').localeCompare(b['申請日'] || ''));
+
+            pendingData.forEach(function(row) {
+                var totalAmount = row['合計金額'];
+                var keiriId = row['経理処理ID'];
+                
+                var tr = document.createElement('tr');
+                tr.dataset.keiriId = keiriId;
+                
+                tr.innerHTML = `
+                    <td>
+                        <input class="form-check-input pending-checkbox" type="checkbox" 
+                            value="${keiriId}" data-amount="${totalAmount}">
+                    </td>
+                    <td>${(row['申請日'] || '').substring(0, 10)}</td>
+                    <td><span class="badge bg-secondary">${row['システム区分']}</span></td>
+                    <td>${row['申請者名']}</td>
+                    <td class="text-break-word">${row['件名']} (${row['元申請ID'].substring(0, 8)}...)</td>
+                    <td class="text-danger fw-bold">${formatNumber(totalAmount)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="openDetailModal('${keiriId}')">
+                            <i class="bi bi-eye"></i> 詳細
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            document.getElementById('pending-count').textContent = pendingData.length + ' 件';
+            updateTotalSelectedAmount();
+        }
+
+        // --- 選択・合計金額計算 ---
+
+        function toggleAll(checked) {
+            document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = checked);
+            updateTotalSelectedAmount();
+        }
+
+        function updateTotalSelectedAmount() {
+            var total = 0;
+            document.querySelectorAll('.pending-checkbox:checked').forEach(cb => {
+                total += parseFloat(cb.dataset.amount) || 0;
+            });
+            document.getElementById('total-selected-amount').textContent = formatNumber(total) + ' 円';
+        }
+
+        // --- モーダル・詳細機能 ---
+
+        /**
+         * 詳細モーダルを開く
+         */
+        function openDetailModal(keiriId) {
+            currentKeiriId = keiriId;
+            var header = pendingData.find(d => d['経理処理ID'] === keiriId);
+            
+            if (!header) {
+                showCustomAlert('データが見つかりません。', true);
+                return;
+            }
+
+            showLoading(true, '明細データを取得中...');
+
+            // 経理DBから明細データを取得する
+            google.script.run
+                .withSuccessHandler(function(result) {
+                    showLoading(false);
+                    if (result.status === 'success') {
+                        renderDetailModal(header, result.details);
+                        detailModal.show();
+                    } else {
+                        showCustomAlert(result.message, true);
+                    }
+                })
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    showCustomAlert('明細取得中にGASエラーが発生しました: ' + error.message, true);
+                })
+                .getReportDetailsForKeiri(keiriId);
+        }
+
+        /**
+         * 詳細モーダルにデータをレンダリングする (領収書リンク追加)
+         */
+        function renderDetailModal(header, details) {
+            document.getElementById('detailKeiriId').textContent = header['経理処理ID'];
+            document.getElementById('detailSystemType').textContent = header['システム区分'];
+            document.getElementById('detailApplicant').textContent = header['申請者名'];
+            document.getElementById('detailApplyDate').textContent = (header['申請日'] || '').substring(0, 10);
+            document.getElementById('detailTotalAmount').textContent = formatNumber(header['合計金額']);
+            document.getElementById('detailSubject').textContent = header['件名'];
+            
+            var detailsBody = document.getElementById('reportDetailsBody');
+            detailsBody.innerHTML = '';
+            
+            // 過去の差し戻しコメントがあれば表示
+            var rejectionArea = document.getElementById('rejection-comment-area');
+            // (vOmatome 修正) '経理コメント' -> '差戻し理由' (ただし、経理DBの列名は変えていないのでキーは '経理コメント' のままか？)
+            // ※元のコードは経理DBの'経理コメント'を参照していなかった。これはIndex.html側のバグ。
+            // 経理DBのヘッダーに '経理コメント' 列はないため、この機能は元々動いていなかった可能性が高い。
+            // DB列名は変更していないため、このままにしておく (header['経理コメント'] は undefined のはず)
+            var comment = header['経理コメント']; 
+            if (comment) {
+                document.getElementById('rejectionComment').textContent = comment;
+                rejectionArea.style.display = 'block';
+            } else {
+                rejectionArea.style.display = 'none';
+            }
+
+            if (details && details.length > 0) {
+                details.forEach(function(detail) {
+                    // 領収書リンクの生成
+                    var receiptLinkHtml = detail['領収書URL'] 
+                        ? `<a href="${detail['領収書URL']}" target="_blank" class="btn btn-sm btn-outline-info" title="領収書画像を開く"><i class="bi bi-box-arrow-up-right"></i></a>` 
+                        : '';
+
+                    detailsBody.innerHTML += `
+                        <tr>
+                            <td>${(detail['利用日'] || '').substring(0, 10)}</td>
+                            <td>${detail['経費項目名']}</td>
+                            <td>${formatNumber(detail['金額'])}</td>
+                            <td>${detail['エリアコード'] || ''}</td>
+                            <td>${detail['備考'] || ''}</td>
+                            <td>${receiptLinkHtml}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                detailsBody.innerHTML = '<tr><td colspan="6" class="text-center">明細データがありません。</td></tr>';
+            }
+        }
+
+        // --- 一括処理 ---
+        
+        /**
+         * 一括支払済処理の開始
+         */
+        function handleBulkProcess() {
+            var selectedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) {
+                showCustomAlert('処理対象を選択してください。', false);
+                return;
+            }
+            // (vOmatome 修正)
+            if (!confirm(selectedIds.length + ' 件の申請を「支払済」に更新します。よろしいですか？')) return;
+            
+            // ログインユーザー名を取得
+            var keiriTantouName = USER_NAME || prompt('担当者名を入力してください:') || '不明';
+            
+            handleProcess(selectedIds, keiriTantouName);
+        }
+
+        /**
+         * 支払済処理を実行する
+         * @param {string | string[]} keiriIds - 処理対象の経理処理ID (単一または配列)
+         */
+        function handleProcess(keiriIds, keiriTantouName) {
+            keiriIds = Array.isArray(keiriIds) ? keiriIds : [keiriIds];
+            showLoading(true, '支払済処理を実行中...'); // (vOmatome 修正)
+
+            google.script.run
+                .withSuccessHandler(function(result) {
+                    showLoading(false);
+                    showCustomAlert(result.message, result.status === 'error');
+                    loadPendingData(); // リロード
+                })
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    // (vOmatome 修正)
+                    showCustomAlert('支払済処理中にGASエラーが発生しました: ' + error.message, true);
+                })
+                .markAsProcessed(keiriIds, keiriTantouName);
+        }
+
+
+        // --- 差し戻し処理 ---
+
+        /**
+         * 一括差し戻し処理の開始
+         */
+        function handleBulkReject() {
+            var selectedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) {
+                showCustomAlert('差し戻し対象を選択してください。', false);
+                return;
+            }
+            if (selectedIds.length > 1) {
+                // 一括差し戻しは、理由が個別に異なる可能性があるため、単一選択を推奨
+                showCustomAlert('差し戻しは、一度に1件ずつ実行してください。', false);
+                return;
+            }
+            
+            // モーダルを開く
+            currentKeiriId = selectedIds[0];
+            openRejectModal(currentKeiriId);
+        }
+
+        /**
+         * 差し戻しモーダルを開く
+         */
+        function openRejectModal(keiriId) {
+            currentKeiriId = keiriId;
+            document.getElementById('rejectReason').value = '';
+            rejectModal.show();
+        }
+
+        /**
+         * 差し戻し実行の確定
+         */
+        function confirmReject() {
+            var reason = document.getElementById('rejectReason').value.trim();
+            if (!reason) {
+                showCustomAlert('差し戻し理由を必ず入力してください。', false);
+                return;
+            }
+            
+            if (!confirm('申請ID: ' + currentKeiriId + ' を「差し戻し」ます。よろしいですか？\nこの操作は元に戻せません。')) return;
+
+            rejectModal.hide();
+            showLoading(true, '差し戻し処理を実行中...');
+
+            google.script.run
+                .withSuccessHandler(function(result) {
+                    showLoading(false);
+                    showCustomAlert(result.message, result.status === 'error');
+                    loadPendingData(); // リロード
+                })
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    showCustomAlert('差し戻し中にGASエラーが発生しました: ' + error.message, true);
+                })
+                .markAsRejected(currentKeiriId, reason);
+        }
+        
+        /**
+         * CSVエクスポートを実行する
+         */
+        function exportData() {
+             showLoading(true, 'CSVを作成中...');
+            google.script.run
+                .withSuccessHandler(function(result) {
+                    showLoading(false);
+                    if (result.status === 'success') {
+                        // ダウンロード処理
+                        var blob = new Blob([result.csvData], { type: 'text/csv;charset=utf-8;' });
+                        var link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = result.fileName;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        showCustomAlert('CSVファイルがダウンロードされました。', false);
+                    } else {
+                        showCustomAlert(result.message, true);
+                    }
+                })
+                .withFailureHandler(function(error) {
+                    showLoading(false);
+                    showCustomAlert('CSVエクスポート中にGASエラーが発生しました: ' + error.message, true);
+                })
+                .exportPendingAsCSV();
+        }
+
+    </script>
+</body>
+</html>
