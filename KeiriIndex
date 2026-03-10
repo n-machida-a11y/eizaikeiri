@@ -77,9 +77,16 @@
                             <button class="btn btn-sm btn-outline-primary" onclick="handleSyncData()">
                                 <i class="bi bi-arrow-clockwise"></i> データ同期
                             </button>
-                            <button class="btn btn-sm btn-outline-success" onclick="exportData()">
-                                <i class="bi bi-file-earmark-spreadsheet"></i> CSV出力
-                            </button>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-success" onclick="exportData('振込済')">
+                                    <i class="bi bi-file-earmark-spreadsheet"></i> 支払済CSV
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="exportData('振込済'); return false;"><i class="bi bi-check-circle me-1 text-success"></i>支払済データ</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="exportData('振込待ち'); return false;"><i class="bi bi-hourglass-split me-1 text-warning"></i>支払待ちデータ</a></li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
 
@@ -602,10 +609,11 @@
             google.script.run.withSuccessHandler(res=>{ showLoading(false); alert(res.message); loadPendingData(); }).markAsRejected(currentKeiriId, reason);
         }
 
-        function exportData() {
+        function exportData(statusFilter) {
             var checkedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
+            var statusLabel = statusFilter === '振込済' ? '支払済' : '支払待ち';
             var targetLabel = checkedIds.length > 0 ? checkedIds.length + '件（選択中）' : '全件';
-            if (!confirm(targetLabel + 'をCSV出力しますか？')) return;
+            if (!confirm(statusLabel + ' ' + targetLabel + 'をCSV出力しますか？')) return;
 
             showLoading(true);
             google.script.run.withSuccessHandler(res=>{
@@ -616,7 +624,7 @@
                     a.download = res.fileName;
                     a.click();
                 } else alert(res.message);
-            }).exportPendingAsCSV(checkedIds.length > 0 ? checkedIds : null);
+            }).exportPendingAsCSV(checkedIds.length > 0 ? checkedIds : null, statusFilter);
         }
 
         function handleProcess(id) {

@@ -540,10 +540,12 @@ function markAsRejected(id, reason) {
 }
 
 // selectedIds: 指定があればその経理処理IDのみ出力、null/空なら全件
-function exportPendingAsCSV(selectedIds) {
+// statusFilter: '振込済' or '振込待ち'（省略時は'振込済'）
+function exportPendingAsCSV(selectedIds, statusFilter) {
     checkAccess_();
     try {
-        var allHeaders = loadPendingHeaders_Internal_().filter(h => h['経理ステータス'] === '振込待ち');
+        var targetStatus = statusFilter || '振込済';
+        var allHeaders = loadPendingHeaders_Internal_().filter(h => h['経理ステータス'] === targetStatus);
         var headers = (selectedIds && selectedIds.length > 0)
             ? allHeaders.filter(h => selectedIds.indexOf(h['経理処理ID']) > -1)
             : allHeaders;
