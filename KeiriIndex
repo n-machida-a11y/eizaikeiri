@@ -51,6 +51,16 @@
         </div>
     </div>
 
+    <!-- トースト通知 -->
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 11000;">
+        <div id="appToast" class="toast align-items-center border-0 text-white bg-success" role="alert">
+            <div class="d-flex">
+                <div class="toast-body fw-bold" id="toastMessage"></div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+
     <!-- メインコンテンツ -->
     <div class="container-fluid p-3 p-md-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
@@ -88,7 +98,7 @@
                                 </li>
                             </ul>
                             <div class="d-flex gap-2 pb-2">
-                                <button class="btn btn-sm btn-outline-primary" id="syncBtn" onclick="handleSyncData()">
+                                <button class="btn btn-sm btn-outline-primary" onclick="handleSyncData()">
                                     <i class="bi bi-arrow-clockwise"></i> データ同期
                                 </button>
                                 <div class="btn-group">
@@ -150,7 +160,7 @@
         <? } ?>
     </div>
 
-    <!-- モーダル: 申請詳細 (UI改善版) -->
+    <!-- モーダル: 申請詳細 -->
     <div class="modal fade" id="reportDetailModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 98%;">
             <div class="modal-content border-0 shadow">
@@ -170,17 +180,14 @@
                 </div>
 
                 <div class="modal-body bg-light">
-                    <!-- ヘッダー情報カード -->
                     <div class="card mb-3 border-0 shadow-sm">
                         <div class="card-body">
                             <div class="row align-items-center">
-                                <!-- 左側: 申請概要 -->
                                 <div class="col-lg-8 border-end-lg">
                                     <div class="d-flex align-items-center mb-2">
                                         <span id="detailSystemType" class="badge bg-secondary me-2 system-badge">システム</span>
                                         <h5 class="card-title mb-0 fw-bold text-dark" id="detailSubject">件名</h5>
                                     </div>
-
                                     <div class="row g-3 mt-1">
                                         <div class="col-md-4 col-sm-6">
                                             <p class="info-label">申請者</p>
@@ -194,15 +201,12 @@
                                             <p class="info-label">承認者</p>
                                             <p class="info-value text-primary" id="detailApprover">氏名</p>
                                         </div>
-                                        <!-- IDは非表示 -->
                                         <div class="col-md-2 col-sm-6 hidden-id">
                                             <p class="info-label">ID</p>
                                             <p class="text-muted small mb-0" id="detailKeiriId">ID</p>
                                         </div>
                                     </div>
                                 </div>
-
-                                <!-- 右側: 金額サマリ -->
                                 <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 ps-lg-4">
                                     <p class="info-label mb-0">振込予定額 (精算金額)</p>
                                     <div class="amount-display text-primary fw-bold" style="font-size: 2.2rem;">
@@ -217,7 +221,6 @@
                         </div>
                     </div>
 
-                    <!-- 明細テーブル -->
                     <div class="card border-0 shadow-sm">
                         <div class="card-body p-0">
                             <div class="table-responsive">
@@ -235,9 +238,7 @@
                                             <th style="width: 50px;">画像</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="reportDetailsBody" class="bg-white">
-                                        <!-- 明細行 -->
-                                    </tbody>
+                                    <tbody id="reportDetailsBody" class="bg-white"></tbody>
                                 </table>
                             </div>
                         </div>
@@ -279,6 +280,21 @@
         </div>
     </div>
 
+    <!-- モーダル: 確認ダイアログ（alert/confirm代替） -->
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-body py-4 px-4 text-center">
+                    <p id="confirmMessage" class="mb-0"></p>
+                </div>
+                <div class="modal-footer border-0 justify-content-center pb-3 gap-2">
+                    <button class="btn btn-light px-4" id="confirmCancelBtn">キャンセル</button>
+                    <button class="btn btn-primary px-4" id="confirmOkBtn">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         var USER_NAME = '<?= userName ?>';
@@ -289,27 +305,49 @@
         var isEditMode = false;
         var currentStatus = '振込待ち';
 
-        var detailModal, rejectModal;
+        var detailModal, rejectModal, confirmModal, appToast;
+        var confirmCallback = null;
 
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('user-info-display').textContent = USER_NAME + ' (' + (<?= isAccountant ?> ? '経理' : '閲覧者') + ')';
             detailModal = new bootstrap.Modal(document.getElementById('reportDetailModal'));
             rejectModal = new bootstrap.Modal(document.getElementById('rejectModal'));
+            confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+            appToast = new bootstrap.Toast(document.getElementById('appToast'), { delay: 3000 });
 
             loadExpenseMaster();
 
             document.getElementById('editModeSwitch').addEventListener('change', e => toggleEditMode(e.target.checked));
             document.getElementById('check-all').addEventListener('change', e => toggleAll(e.target.checked));
-
-            document.getElementById('detailProcessBtn').addEventListener('click', () => {
-                handleProcess(currentKeiriId);
-                detailModal.hide();
-            });
+            document.getElementById('detailProcessBtn').addEventListener('click', () => handleProcess(currentKeiriId));
             document.getElementById('detailRejectBtn').addEventListener('click', () => openRejectModal(currentKeiriId));
             document.getElementById('confirmRejectBtn').addEventListener('click', confirmReject);
+            document.getElementById('confirmOkBtn').addEventListener('click', function() {
+                confirmModal.hide();
+                if (confirmCallback) { confirmCallback(); confirmCallback = null; }
+            });
+            document.getElementById('confirmCancelBtn').addEventListener('click', function() {
+                confirmModal.hide();
+                confirmCallback = null;
+            });
 
             loadPendingData();
         });
+
+        // --- 通知ヘルパー ---
+        function showToast(message, isError) {
+            var el = document.getElementById('appToast');
+            el.className = 'toast align-items-center border-0 text-white ' + (isError ? 'bg-danger' : 'bg-success');
+            document.getElementById('toastMessage').textContent = message;
+            appToast.show();
+        }
+
+        function showConfirm(message, okLabel, callback) {
+            document.getElementById('confirmMessage').textContent = message;
+            document.getElementById('confirmOkBtn').textContent = okLabel || 'OK';
+            confirmCallback = callback;
+            confirmModal.show();
+        }
 
         // --- データロード ---
         function loadExpenseMaster() {
@@ -320,7 +358,6 @@
             currentStatus = status;
             document.getElementById('tab-pending').classList.toggle('active', status === '振込待ち');
             document.getElementById('tab-processed').classList.toggle('active', status === '振込済');
-            // 支払済タブではアクションボタンを非表示
             document.getElementById('action-footer').style.display = status === '振込待ち' ? '' : 'none';
             document.getElementById('check-all').checked = false;
             loadPendingData();
@@ -330,47 +367,57 @@
             showLoading(true);
             google.script.run
                 .withSuccessHandler(onLoadPendingDataSuccess)
-                .withFailureHandler(e => { showLoading(false); alert('Error: ' + e.message); })
+                .withFailureHandler(e => { showLoading(false); showToast('読み込みエラー: ' + e.message, true); })
                 .loadPendingHeaders(currentStatus);
         }
 
         function onLoadPendingDataSuccess(result) {
             showLoading(false);
-            if (result.status === 'error') { alert(result.message); return; }
-
+            if (result.status === 'error') { showToast(result.message, true); return; }
             pendingData = result.data || [];
+            renderPendingList();
+        }
+
+        // 一覧を描画（金額0円を除外）
+        function renderPendingList() {
+            var filtered = pendingData.filter(row => parseCurrency(row['合計金額']) > 0);
             var tbody = document.getElementById('pending-list-body');
             tbody.innerHTML = '';
 
-            if (pendingData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center p-5 text-muted">現在、支払待ちの申請はありません。</td></tr>';
-                document.getElementById('pending-count').textContent = '0 件';
-                return;
+            var count = filtered.length;
+            var emptyLabel = currentStatus === '振込待ち' ? '支払待ち' : '支払済';
+            if (count === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center p-5 text-muted">現在、' + emptyLabel + 'の申請はありません。</td></tr>';
+            } else {
+                filtered.forEach(function(row) {
+                    var tr = document.createElement('tr');
+                    tr.onclick = (e) => { if(e.target.type !== 'checkbox' && e.target.tagName !== 'BUTTON') openDetailModal(row['経理処理ID']); };
+                    tr.innerHTML = `
+                        <td class="text-center" onclick="event.stopPropagation()">
+                            <input class="form-check-input pending-checkbox" type="checkbox" value="${row['経理処理ID']}">
+                        </td>
+                        <td>${formatDate(row['申請日'])}</td>
+                        <td><span class="badge bg-secondary system-badge">${row['システム区分']}</span></td>
+                        <td class="fw-medium">${row['申請者名']}</td>
+                        <td><div class="text-truncate" style="max-width: 300px;">${row['件名']}</div></td>
+                        <td class="text-end fw-bold amount-display">${formatNumber(row['合計金額'])}</td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="event.stopPropagation(); openDetailModal('${row['経理処理ID']}')">詳細</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
             }
-
-            pendingData.forEach(function(row) {
-                var tr = document.createElement('tr');
-                tr.onclick = (e) => { if(e.target.type !== 'checkbox' && e.target.tagName !== 'BUTTON') openDetailModal(row['経理処理ID']); };
-                tr.innerHTML = `
-                    <td class="text-center" onclick="event.stopPropagation()">
-                        <input class="form-check-input pending-checkbox" type="checkbox" value="${row['経理処理ID']}">
-                    </td>
-                    <td>${formatDate(row['申請日'])}</td>
-                    <td><span class="badge bg-secondary system-badge">${row['システム区分']}</span></td>
-                    <td class="fw-medium">${row['申請者名']}</td>
-                    <td>
-                        <div class="text-truncate" style="max-width: 300px;">${row['件名']}</div>
-                    </td>
-                    <td class="text-end fw-bold amount-display">${formatNumber(row['合計金額'])}</td>
-                    <td class="text-center">
-                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="event.stopPropagation(); openDetailModal('${row['経理処理ID']}')">詳細</button>
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-            document.getElementById('pending-count').textContent = pendingData.length + ' 件';
+            document.getElementById('pending-count').textContent = count + ' 件';
             var badgeId = currentStatus === '振込待ち' ? 'badge-pending' : 'badge-processed';
-            document.getElementById(badgeId).textContent = pendingData.length;
+            document.getElementById(badgeId).textContent = count;
+        }
+
+        // 処理済みIDをローカルデータから除去して再描画（サーバー再取得なし）
+        function removeItemsFromList(ids) {
+            var idArray = Array.isArray(ids) ? ids : [ids];
+            pendingData = pendingData.filter(d => idArray.indexOf(d['経理処理ID']) === -1);
+            renderPendingList();
         }
 
         // --- 詳細・編集 ---
@@ -379,35 +426,31 @@
             currentHeader = pendingData.find(d => d['経理処理ID'] === keiriId);
             if (!currentHeader) return;
 
-            // 初期状態リセット
             document.getElementById('editModeSwitch').checked = false;
             isEditMode = false;
             document.getElementById('saveChangesBtn').classList.add('d-none');
 
-            // ヘッダー情報セット (一覧データで初期表示)
             document.getElementById('detailKeiriId').textContent = currentHeader['経理処理ID'];
             document.getElementById('detailSystemType').textContent = currentHeader['システム区分'];
             document.getElementById('detailApplicant').textContent = currentHeader['申請者名'];
             document.getElementById('detailApplyDate').textContent = formatDate(currentHeader['申請日']);
             document.getElementById('detailSubject').textContent = currentHeader['件名'];
-
-            // 承認者名 (揺れに対応)
             document.getElementById('detailApprover').textContent = currentHeader['承認者名'] || currentHeader['承認者'] || '-';
-
-            // 金額情報 (ヘッダー: 一旦一覧データで表示)
             document.getElementById('detailTotalAmount').textContent = formatNumber(currentHeader['合計金額']);
             document.getElementById('detailCardTotal').textContent = formatNumber(currentHeader['カード利用額'] || 0);
             document.getElementById('detailSettlementAmount').textContent = formatNumber(currentHeader['精算金額'] || currentHeader['合計金額']);
 
-            showLoading(true);
+            // モーダルを先に表示し、明細はローディング表示で読み込む
+            document.getElementById('reportDetailsBody').innerHTML =
+                '<tr><td colspan="9" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>明細読み込み中...</td></tr>';
+            detailModal.show();
+
             google.script.run.withSuccessHandler(function(res) {
-                showLoading(false);
                 if (res.status === 'success') {
                     renderDetails(res.details);
                     updateHeaderAmountsFromDetails(res.details);
-                    detailModal.show();
                 } else {
-                    alert(res.message);
+                    showToast(res.message, true);
                 }
             }).getReportDetailsForKeiri(keiriId);
         }
@@ -420,7 +463,10 @@
                 var tr = document.createElement('tr');
                 tr.dataset.detailId = detail['明細ID'];
 
-                var receipt = detail['領収書URL'] ? `<a href="${detail['領収書URL']}" target="_blank" class="text-primary"><i class="bi bi-image"></i></a>` : '<span class="text-muted">-</span>';
+                // 領収書: 新規ウィンドウで開く
+                var receipt = detail['領収書URL']
+                    ? `<a href="#" onclick="window.open('${detail['領収書URL']}','receipt','width=900,height=700,scrollbars=yes,resizable=yes'); return false;" class="text-primary"><i class="bi bi-image"></i></a>`
+                    : '<span class="text-muted">-</span>';
 
                 var amountVal = (detail.amount !== undefined) ? detail.amount : parseCurrency(detail['金額']);
                 var cardVal = (detail.cardAmount !== undefined) ? detail.cardAmount : parseCurrency(detail['カード利用額']);
@@ -448,21 +494,14 @@
         }
 
         function updateHeaderAmountsFromDetails(details) {
-            var totalAmount = 0;
-            var totalCard = 0;
-
+            var totalAmount = 0, totalCard = 0;
             details.forEach(function(d) {
-                var amt = (d.amount !== undefined) ? d.amount : parseCurrency(d['金額']);
-                var crd = (d.cardAmount !== undefined) ? d.cardAmount : parseCurrency(d['カード利用額']);
-                totalAmount += amt;
-                totalCard += crd;
+                totalAmount += (d.amount !== undefined) ? d.amount : parseCurrency(d['金額']);
+                totalCard += (d.cardAmount !== undefined) ? d.cardAmount : parseCurrency(d['カード利用額']);
             });
-
-            var totalSettle = totalAmount - totalCard;
-
             document.getElementById('detailTotalAmount').textContent = formatNumber(totalAmount);
             document.getElementById('detailCardTotal').textContent = formatNumber(totalCard);
-            document.getElementById('detailSettlementAmount').textContent = formatNumber(totalSettle);
+            document.getElementById('detailSettlementAmount').textContent = formatNumber(totalAmount - totalCard);
         }
 
         function parseCurrency(val) {
@@ -473,15 +512,9 @@
 
         function toggleEditMode(enabled) {
             isEditMode = enabled;
+            document.getElementById('saveChangesBtn').classList.toggle('d-none', !enabled);
+
             var rows = document.querySelectorAll('#reportDetailsBody tr');
-            var saveBtn = document.getElementById('saveChangesBtn');
-
-            if (enabled) {
-                saveBtn.classList.remove('d-none');
-            } else {
-                saveBtn.classList.add('d-none');
-            }
-
             rows.forEach(row => {
                 var cellAmount = row.querySelector('.cell-amount');
                 var cellCard = row.querySelector('.cell-card');
@@ -492,44 +525,27 @@
 
                 if (enabled) {
                     row.classList.add('editing-row');
+                    cellAmount.innerHTML = `<input type="number" class="edit-input text-end" value="${cellAmount.dataset.val}">`;
+                    cellCard.innerHTML = `<input type="number" class="edit-input text-end" value="${cellCard.dataset.val}" placeholder="0">`;
 
-                    // 金額
-                    var amountVal = cellAmount.dataset.val;
-                    cellAmount.innerHTML = `<input type="number" class="edit-input text-end" value="${amountVal}">`;
-
-                    // カード利用額
-                    var cardVal = cellCard.dataset.val;
-                    cellCard.innerHTML = `<input type="number" class="edit-input text-end" value="${cardVal}" placeholder="0">`;
-
-                    // 経費項目 (プルダウン)
                     var currentCode = cellItem.dataset.val;
                     var selectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
                     expenseMasterList.forEach(m => {
-                        var selected = String(m.code) === String(currentCode) ? 'selected' : '';
-                        selectHtml += `<option value="${m.code}" ${selected}>${m.name}</option>`;
+                        selectHtml += `<option value="${m.code}" ${String(m.code) === String(currentCode) ? 'selected' : ''}>${m.name}</option>`;
                     });
-                    selectHtml += `</select>`;
-                    cellItem.innerHTML = selectHtml;
+                    cellItem.innerHTML = selectHtml + '</select>';
 
-                    // 勘定科目 (テキスト入力)
-                    var accountVal = cellAccount.dataset.val || '';
-                    cellAccount.innerHTML = `<input type="text" class="form-control form-control-sm" value="${accountVal}" placeholder="例: 旅費交通費" style="min-width:120px;">`;
+                    cellAccount.innerHTML = `<input type="text" class="form-control form-control-sm" value="${cellAccount.dataset.val}" placeholder="例: 旅費交通費" style="min-width:120px;">`;
 
-                    // 税区分 (プルダウン)
                     var taxVal = cellTax.dataset.val || '';
                     var taxOptions = ['', '課税仕入（10%）', '課税仕入（軽減税率8%）', '非課税', '免税', '対象外'];
                     var taxSelectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
-                    taxOptions.forEach(function(opt) {
-                        var selected = opt === taxVal ? 'selected' : '';
-                        taxSelectHtml += `<option value="${opt}" ${selected}>${opt || '-- 選択 --'}</option>`;
+                    taxOptions.forEach(opt => {
+                        taxSelectHtml += `<option value="${opt}" ${opt === taxVal ? 'selected' : ''}>${opt || '-- 選択 --'}</option>`;
                     });
-                    taxSelectHtml += `</select>`;
-                    cellTax.innerHTML = taxSelectHtml;
+                    cellTax.innerHTML = taxSelectHtml + '</select>';
 
-                    // 備考
-                    var remarksVal = cellRemarks.dataset.val || '';
-                    cellRemarks.innerHTML = `<input type="text" class="form-control form-control-sm" value="${remarksVal}">`;
-
+                    cellRemarks.innerHTML = `<input type="text" class="form-control form-control-sm" value="${cellRemarks.dataset.val || ''}">`;
                 } else {
                     row.classList.remove('editing-row');
                 }
@@ -540,86 +556,68 @@
 
         // --- 一括保存 ---
         function saveAllChanges() {
-            if (!confirm('編集内容をすべて保存し、連携元のシートにも反映しますか？')) return;
-
-            var updatesList = [];
-            var rows = document.querySelectorAll('#reportDetailsBody tr');
-
-            rows.forEach(row => {
-                var detailId = row.dataset.detailId;
-
-                var inputAmount = row.querySelector('.cell-amount input');
-                var inputCard = row.querySelector('.cell-card input');
-                var selectItem = row.querySelector('.cell-item select');
-                var inputAccount = row.querySelector('.cell-account input');
-                var selectTax = row.querySelector('.cell-tax select');
-                var inputRemarks = row.querySelector('.cell-remarks input');
-
-                if (!inputAmount) return;
-
-                var newAmount = inputAmount.value;
-                var newCard = inputCard.value || 0;
-                var newItemCode = selectItem.value;
-                var newAccountTitle = inputAccount ? inputAccount.value : undefined;
-                var newTaxCategory = selectTax ? selectTax.value : undefined;
-                var newRemarks = inputRemarks.value;
-
-                var master = expenseMasterList.find(m => m.code == newItemCode);
-                var newItemName = master ? master.name : '';
-
-                updatesList.push({
-                    detailId: detailId,
-                    amount: newAmount,
-                    cardAmount: newCard,
-                    itemCode: newItemCode,
-                    itemName: newItemName,
-                    accountTitle: newAccountTitle,
-                    taxCategory: newTaxCategory,
-                    remarks: newRemarks
+            showConfirm('編集内容をすべて保存し、連携元のシートにも反映しますか？', '保存する', function() {
+                var updatesList = [];
+                document.querySelectorAll('#reportDetailsBody tr').forEach(row => {
+                    var inputAmount = row.querySelector('.cell-amount input');
+                    if (!inputAmount) return;
+                    var newItemCode = row.querySelector('.cell-item select').value;
+                    var master = expenseMasterList.find(m => m.code == newItemCode);
+                    updatesList.push({
+                        detailId: row.dataset.detailId,
+                        amount: inputAmount.value,
+                        cardAmount: row.querySelector('.cell-card input').value || 0,
+                        itemCode: newItemCode,
+                        itemName: master ? master.name : '',
+                        accountTitle: row.querySelector('.cell-account input') ? row.querySelector('.cell-account input').value : undefined,
+                        taxCategory: row.querySelector('.cell-tax select') ? row.querySelector('.cell-tax select').value : undefined,
+                        remarks: row.querySelector('.cell-remarks input').value
+                    });
                 });
+
+                if (updatesList.length === 0) { showToast('変更内容がありません。', true); return; }
+
+                showLoading(true);
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        showLoading(false);
+                        if (res.status === 'success') {
+                            showToast(res.message);
+                            toggleEditMode(false);
+                            loadPendingData();
+                        } else {
+                            showToast('エラー: ' + res.message, true);
+                        }
+                    })
+                    .updateDetailItems(currentKeiriId, updatesList, currentHeader['システム区分'], currentHeader['元申請ID']);
             });
-
-            if (updatesList.length === 0) {
-                alert("変更内容がありません。");
-                return;
-            }
-
-            showLoading(true);
-            google.script.run
-                .withSuccessHandler(function(res) {
-                    showLoading(false);
-                    if (res.status === 'success') {
-                        alert(res.message);
-                        if (res.newTotal) document.getElementById('detailSettlementAmount').textContent = formatNumber(res.newTotal);
-                        toggleEditMode(false);
-                        loadPendingData();
-                    } else {
-                        alert('エラー: ' + res.message);
-                    }
-                })
-                .updateDetailItems(currentKeiriId, updatesList, currentHeader['システム区分'], currentHeader['元申請ID']);
         }
 
-        // --- 共通 ---
+        // --- 共通アクション ---
         function handleSyncData() {
             showLoading(true);
             google.script.run
-                .withSuccessHandler(res => { showLoading(false); alert(res.message); loadPendingData(); })
-                .withFailureHandler(e => { showLoading(false); alert('同期エラー: ' + e.message); })
+                .withSuccessHandler(res => { showLoading(false); showToast(res.message, res.status === 'error'); loadPendingData(); })
+                .withFailureHandler(e => { showLoading(false); showToast('同期エラー: ' + e.message, true); })
                 .syncDataFromSources();
         }
 
         function handleBulkProcess() {
-            var ids = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c=>c.value);
-            if(ids.length===0) return alert('申請を選択してください');
-            if(!confirm(ids.length + '件を支払済にしますか？')) return;
-            showLoading(true);
-            google.script.run.withSuccessHandler(res=>{ showLoading(false); alert(res.message); loadPendingData(); }).markAsProcessed(ids, USER_NAME);
+            var ids = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
+            if (ids.length === 0) { showToast('申請を選択してください', true); return; }
+            showConfirm(ids.length + '件を支払済にしますか？', '支払済にする', function() {
+                showLoading(true);
+                google.script.run.withSuccessHandler(res => {
+                    showLoading(false);
+                    showToast(res.message, res.status === 'error');
+                    if (res.status === 'success') removeItemsFromList(ids);
+                }).markAsProcessed(ids, USER_NAME);
+            });
         }
 
         function handleBulkReject() {
-            var ids = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c=>c.value);
-            if(ids.length!==1) return alert('差し戻しは詳細確認のため、1件ずつ行ってください');
+            var ids = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
+            if (ids.length !== 1) { showToast('差し戻しは詳細確認のため、1件ずつ行ってください', true); return; }
             openRejectModal(ids[0]);
         }
 
@@ -631,40 +629,54 @@
 
         function confirmReject() {
             var reason = document.getElementById('rejectReason').value;
-            if(!reason) return alert('差し戻し理由を入力してください');
+            if (!reason) { showToast('差し戻し理由を入力してください', true); return; }
             rejectModal.hide();
             showLoading(true);
-            google.script.run.withSuccessHandler(res=>{ showLoading(false); alert(res.message); loadPendingData(); }).markAsRejected(currentKeiriId, reason);
+            google.script.run.withSuccessHandler(res => {
+                showLoading(false);
+                showToast(res.message, res.status === 'error');
+                if (res.status === 'success') {
+                    detailModal.hide();
+                    removeItemsFromList(currentKeiriId);
+                }
+            }).markAsRejected(currentKeiriId, reason);
+        }
+
+        function handleProcess(id) {
+            showConfirm('この申請を支払済にしますか？', '支払済にする', function() {
+                detailModal.hide();
+                showLoading(true);
+                google.script.run.withSuccessHandler(res => {
+                    showLoading(false);
+                    showToast(res.message, res.status === 'error');
+                    if (res.status === 'success') removeItemsFromList(id);
+                }).markAsProcessed(id, USER_NAME);
+            });
         }
 
         function exportData(statusFilter) {
             var checkedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
             var resolvedStatus = statusFilter || currentStatus;
             var statusLabel = resolvedStatus === '振込済' ? '支払済' : '支払待ち';
-            statusFilter = resolvedStatus;
             var targetLabel = checkedIds.length > 0 ? checkedIds.length + '件（選択中）' : '全件';
-            if (!confirm(statusLabel + ' ' + targetLabel + 'をCSV出力しますか？')) return;
-
-            showLoading(true);
-            google.script.run.withSuccessHandler(res=>{
-                showLoading(false);
-                if(res.status==='success') {
-                    var a = document.createElement('a');
-                    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(res.csvData);
-                    a.download = res.fileName;
-                    a.click();
-                } else alert(res.message);
-            }).exportPendingAsCSV(checkedIds.length > 0 ? checkedIds : null, statusFilter);
-        }
-
-        function handleProcess(id) {
-             if(!confirm('この申請を支払済にしますか？')) return;
-             showLoading(true);
-             google.script.run.withSuccessHandler(res=>{ showLoading(false); alert(res.message); loadPendingData(); }).markAsProcessed(id, USER_NAME);
+            showConfirm(statusLabel + ' ' + targetLabel + 'をCSV出力しますか？', 'CSV出力', function() {
+                showLoading(true);
+                google.script.run.withSuccessHandler(res => {
+                    showLoading(false);
+                    if (res.status === 'success') {
+                        var a = document.createElement('a');
+                        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(res.csvData);
+                        a.download = res.fileName;
+                        a.click();
+                    } else {
+                        showToast(res.message, true);
+                    }
+                }).exportPendingAsCSV(checkedIds.length > 0 ? checkedIds : null, resolvedStatus);
+            });
         }
 
         function showLoading(show) { document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; }
-        function formatNumber(num) { return (parseFloat(num)||0).toLocaleString('ja-JP'); }
+        function formatNumber(num) { return (parseFloat(num) || 0).toLocaleString('ja-JP'); }
         function formatDate(d) { return d ? d.toString().substring(0, 10).replace(/-/g, '/') : ''; }
         function toggleAll(chk) { document.querySelectorAll('.pending-checkbox').forEach(c => c.checked = chk); }
         function escapeHtml(str) {
