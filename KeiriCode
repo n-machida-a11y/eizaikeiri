@@ -276,6 +276,14 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var titleMap = getAccountTitleDefinitions_();
   var taxCategoryMap = getTaxCategoryDefinitions_();
 
+  // 経費項目名マップ（コード→名称）: 経費項目名を持たないアプリからの同期に対応
+  var itemNameMap = {};
+  var masterSheet = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID).getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION);
+  getSheetData_(masterSheet).forEach(function(row) {
+    var code = String(row['経費項目コード']);
+    if (code && !itemNameMap[code]) itemNameMap[code] = row['経費項目'] || '';
+  });
+
   if (idxStatus === -1) return 0;
   var newCount = 0;
   for (var i = 1; i < allValues.length; i++) {
@@ -293,7 +301,10 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
              var code = String(ex['経費項目コード']);
              var key = code + '_' + String(jobType);
              ex.accountTitle = titleMap[key] || '';
-             ex['税区分'] = ex['税区分'] || taxCategoryMap[code] || '';
+             // 経費項目名: シートにあればそのまま、なければマスタから解決
+             ex.itemName = ex.itemName || ex['経費項目名'] || itemNameMap[code] || '';
+             // 税区分: シート列名「消費税区分」(一般経費アプリ) または「税区分」に対応
+             ex['税区分'] = ex['税区分'] || ex['消費税区分'] || taxCategoryMap[code] || '';
           });
 
           var kId = existing ? existing['経理処理ID'] : 'PAY-' + Utilities.getUuid();
@@ -336,7 +347,7 @@ function transferToKeiriDB_(keiriShoriID, systemType, reportId, details, keiriSt
   var detailRows = expenses.map(function(ex) {
     return [
       keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
-      ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName,
+      ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName||ex['経費項目名']||'',
       ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
       ex['カード利用額']||0,
       ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
@@ -388,7 +399,7 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
     var detailRows = expenses.map(function(ex) {
         return [
             keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
-            ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName,
+            ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName||ex['経費項目名']||'',
             ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
             ex['カード利用額']||0,
             ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
