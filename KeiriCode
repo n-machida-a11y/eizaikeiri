@@ -479,9 +479,13 @@ function loadPendingHeaders_Internal_() {
   return sheet ? getSheetData_(sheet) : [];
 }
 
-function loadPendingHeaders() {
+function loadPendingHeaders(statusFilter) {
   checkAccess_();
-  try { var data = loadPendingHeaders_Internal_(); return { status: "success", data: data.filter(r => r['経理ステータス'] === '振込待ち') }; } catch (e) { return { status: "error", message: e.message }; }
+  try {
+    var data = loadPendingHeaders_Internal_();
+    var target = statusFilter || '振込待ち';
+    return { status: "success", data: data.filter(r => r['経理ステータス'] === target) };
+  } catch (e) { return { status: "error", message: e.message }; }
 }
 
 function markAsProcessed(ids, name) { return processStatusChange_(ids, name, '振込済'); }

@@ -71,21 +71,36 @@
             <div id="view-main" class="app-view active">
 
                 <div class="card shadow-sm border-0">
-                    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
-                        <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-list-check me-2"></i>支払待ち申請一覧</h5>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="handleSyncData()">
-                                <i class="bi bi-arrow-clockwise"></i> データ同期
-                            </button>
-                            <div class="btn-group">
-                                <button class="btn btn-sm btn-outline-success" onclick="exportData('振込済')">
-                                    <i class="bi bi-file-earmark-spreadsheet"></i> 支払済CSV
+                    <div class="card-header bg-white pt-3 px-3 pb-0 border-bottom">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <ul class="nav nav-tabs card-header-tabs" id="statusTabs">
+                                <li class="nav-item">
+                                    <button class="nav-link active fw-bold" id="tab-pending" onclick="switchTab('振込待ち')">
+                                        <i class="bi bi-hourglass-split me-1 text-warning"></i>支払待ち
+                                        <span class="badge bg-warning text-dark ms-1" id="badge-pending">-</span>
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link fw-bold" id="tab-processed" onclick="switchTab('振込済')">
+                                        <i class="bi bi-check-circle me-1 text-success"></i>支払済
+                                        <span class="badge bg-success ms-1" id="badge-processed">-</span>
+                                    </button>
+                                </li>
+                            </ul>
+                            <div class="d-flex gap-2 pb-2">
+                                <button class="btn btn-sm btn-outline-primary" id="syncBtn" onclick="handleSyncData()">
+                                    <i class="bi bi-arrow-clockwise"></i> データ同期
                                 </button>
-                                <button type="button" class="btn btn-sm btn-outline-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-                                <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><a class="dropdown-item" href="#" onclick="exportData('振込済'); return false;"><i class="bi bi-check-circle me-1 text-success"></i>支払済データ</a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="exportData('振込待ち'); return false;"><i class="bi bi-hourglass-split me-1 text-warning"></i>支払待ちデータ</a></li>
-                                </ul>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-success" onclick="exportData()">
+                                        <i class="bi bi-file-earmark-spreadsheet"></i> CSV出力
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="exportData('振込済'); return false;"><i class="bi bi-check-circle me-1 text-success"></i>支払済データ</a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="exportData('振込待ち'); return false;"><i class="bi bi-hourglass-split me-1 text-warning"></i>支払待ちデータ</a></li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -121,7 +136,7 @@
                         </div>
                     </div>
 
-                    <div class="card-footer bg-white py-3 text-center border-top">
+                    <div class="card-footer bg-white py-3 text-center border-top" id="action-footer">
                         <button class="btn btn-outline-danger me-3 px-4" onclick="handleBulkReject()">
                             <i class="bi bi-x-circle me-1"></i> 差し戻し
                         </button>
@@ -272,6 +287,7 @@
         var currentKeiriId = null;
         var currentHeader = null;
         var isEditMode = false;
+        var currentStatus = '振込待ち';
 
         var detailModal, rejectModal;
 
@@ -300,12 +316,22 @@
             google.script.run.withSuccessHandler(res => { if(res.status==='success') expenseMasterList = res.list; }).getExpenseMasterList();
         }
 
+        function switchTab(status) {
+            currentStatus = status;
+            document.getElementById('tab-pending').classList.toggle('active', status === '振込待ち');
+            document.getElementById('tab-processed').classList.toggle('active', status === '振込済');
+            // 支払済タブではアクションボタンを非表示
+            document.getElementById('action-footer').style.display = status === '振込待ち' ? '' : 'none';
+            document.getElementById('check-all').checked = false;
+            loadPendingData();
+        }
+
         function loadPendingData() {
             showLoading(true);
             google.script.run
                 .withSuccessHandler(onLoadPendingDataSuccess)
                 .withFailureHandler(e => { showLoading(false); alert('Error: ' + e.message); })
-                .loadPendingHeaders();
+                .loadPendingHeaders(currentStatus);
         }
 
         function onLoadPendingDataSuccess(result) {
@@ -343,6 +369,8 @@
                 tbody.appendChild(tr);
             });
             document.getElementById('pending-count').textContent = pendingData.length + ' 件';
+            var badgeId = currentStatus === '振込待ち' ? 'badge-pending' : 'badge-processed';
+            document.getElementById(badgeId).textContent = pendingData.length;
         }
 
         // --- 詳細・編集 ---
@@ -611,7 +639,9 @@
 
         function exportData(statusFilter) {
             var checkedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
-            var statusLabel = statusFilter === '振込済' ? '支払済' : '支払待ち';
+            var resolvedStatus = statusFilter || currentStatus;
+            var statusLabel = resolvedStatus === '振込済' ? '支払済' : '支払待ち';
+            statusFilter = resolvedStatus;
             var targetLabel = checkedIds.length > 0 ? checkedIds.length + '件（選択中）' : '全件';
             if (!confirm(statusLabel + ' ' + targetLabel + 'をCSV出力しますか？')) return;
 
