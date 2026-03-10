@@ -3,12 +3,12 @@
 // -----------------------------------------------
 var KEIRI_DB_ID = '17WAK08P8zHyfwgbnsXR135XwabbuDGA2BWWu3q1VU70';
 var SALES_DB_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
-var GENERAL_DATA_DB_ID = '15PGONpnqj6UDZa5076nXvKa2sUTg-_XFxHMDjBcgBFM'; 
+var GENERAL_DATA_DB_ID = '15PGONpnqj6UDZa5076nXvKa2sUTg-_XFxHMDjBcgBFM';
 var GENERAL_MASTER_DB_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
 var ACCOUNTANT_CHECK_MASTER_ID = '1CJchjuO03CB0OYmyzdtaOq3N71fRXddG7QBSCJPn1GM';
 
-var ACCOUNTANT_CHECK_COLUMN_NAME = '経理アプリアクセス'; 
-var ACCOUNTANT_CHECK_VALUE = '有'; 
+var ACCOUNTANT_CHECK_COLUMN_NAME = '経理アプリアクセス';
+var ACCOUNTANT_CHECK_VALUE = '有';
 
 // シート名定義
 var SALES_SHEET_NAMES = { HEADER: '日報', ACTIVITIES: '行動明細', EXPENSES: '経費明細', EMPLOYEES: '社員マスタ', EXPENSE_ITEMS: '経費項目マスタ' };
@@ -16,8 +16,8 @@ var GENERAL_SHEET_NAMES = { REPORTS: '経費ヘッダー', EXPENSES: '経費明�
 var KEIRI_SHEET_NAMES = { HEADERS: '振込対象ヘッダー', DETAILS: '振込対象明細' };
 
 var MASTER_SHEET_NAMES = {
-  EXPENSE_DEFINITION: '経費項目', 
-  EMPLOYEES: '社員マスタ'        
+  EXPENSE_DEFINITION: '経費項目',
+  EMPLOYEES: '社員マスタ'
 };
 
 function doGet(e) {
@@ -35,9 +35,9 @@ function getUserInfoAndAccess_() {
   try {
     if (!ACCOUNTANT_CHECK_MASTER_ID || ACCOUNTANT_CHECK_MASTER_ID.indexOf('!!!') > -1) return { name: name, email: email, isAccountant: true };
     var ss = SpreadsheetApp.openById(ACCOUNTANT_CHECK_MASTER_ID);
-    var data = getSheetData_(ss.getSheetByName('社員マスタ')); 
+    var data = getSheetData_(ss.getSheetByName('社員マスタ'));
     for (var i = 0; i < data.length; i++) {
-      if (data[i]['アドレス'] === email) { 
+      if (data[i]['アドレス'] === email) {
         name = data[i]['社員名'];
         var checkValue = data[i][ACCOUNTANT_CHECK_COLUMN_NAME];
         if (checkValue && String(checkValue) === String(ACCOUNTANT_CHECK_VALUE)) isAccountant = true;
@@ -62,7 +62,7 @@ function getReportDetailsForKeiri(keiriShoriID) {
   checkAccess_();
   try {
     var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
-    
+
     // ヘッダーから申請者IDを取得
     var hSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
     var hData = getSheetData_(hSheet);
@@ -74,8 +74,8 @@ function getReportDetailsForKeiri(keiriShoriID) {
     var detailData = getSheetData_(dSheet);
     var filteredDetails = detailData.filter(function(row) { return String(row['経理処理ID']) === String(keiriShoriID); });
 
-    var employeeMap = getEmployeeJobTypeMap_(); 
-    var titleMap = getAccountTitleDefinitions_(); 
+    var employeeMap = getEmployeeJobTypeMap_();
+    var titleMap = getAccountTitleDefinitions_();
     var jobType = applicantId ? employeeMap[applicantId] : null;
 
     filteredDetails = filteredDetails.map(function(d) {
@@ -84,18 +84,19 @@ function getReportDetailsForKeiri(keiriShoriID) {
       var key = String(code) + '_' + String(jobType);
       var masterAccountTitle = titleMap[key] || '';
       d.accountTitle = d['勘定科目'] || masterAccountTitle;
-      
-      d.taxRate = d['消費税率'] || ''; 
-      d.itemName = d['経費項目名'] || ''; 
-      
+
+      d.taxRate = d['消費税率'] || '';
+      d.taxCategory = d['税区分'] || d['消費税率'] || '';
+      d.itemName = d['経費項目名'] || '';
+
       // 数値補正
       var rawAmount = String(d['金額']).replace(/,/g, '');
       var rawCard = String(d['カード利用額'] || d['カード'] || '0').replace(/,/g, '');
-      
+
       d.amount = parseFloat(rawAmount) || 0;
       d.cardAmount = parseFloat(rawCard) || 0;
       d.settlementAmount = d.amount - d.cardAmount;
-      
+
       return d;
     });
     return { status: "success", details: filteredDetails };
@@ -106,7 +107,7 @@ function getExpenseMasterList() {
   checkAccess_();
   try {
     var ss = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID);
-    var sheet = ss.getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION); 
+    var sheet = ss.getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION);
     var data = getSheetData_(sheet);
     var seen = {};
     var list = [];
@@ -135,7 +136,7 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
     var keiriSs = SpreadsheetApp.openById(KEIRI_DB_ID);
     var keiriDetailSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
     var keiriHeaderSheet = keiriSs.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
-    
+
     var hDataRaw = keiriHeaderSheet.getDataRange().getValues();
     var hHeadersTmp = hDataRaw[0];
     var hRow = hDataRaw.find(r => String(r[hHeadersTmp.indexOf('経理処理ID')]) === String(keiriId));
@@ -155,6 +156,7 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
     var idxItemName = dHeaders.indexOf('経費項目名');
     var idxRemarks = dHeaders.indexOf('備考');
     var idxAccount = dHeaders.indexOf('勘定科目');
+    var idxTaxCategory = dHeaders.indexOf('税区分');
 
     var sourceSsId = (systemType === '営業用') ? SALES_DB_ID : GENERAL_DATA_DB_ID;
     var sourceSheetName = (systemType === '営業用') ? SALES_SHEET_NAMES.EXPENSES : GENERAL_SHEET_NAMES.EXPENSES;
@@ -167,11 +169,14 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
     var sIdxCard = sHeaders.indexOf('カード利用額');
     var sIdxCode = sHeaders.indexOf('経費項目コード');
     var sIdxRemarks = sHeaders.indexOf('備考');
+    var sIdxTaxCategory = sHeaders.indexOf('税区分');
+    var sIdxTaxRate = sHeaders.indexOf('消費税率');
 
     updatesList.forEach(function(updates) {
       var detailId = updates.detailId;
-      
-      if (updates.itemCode) {
+
+      // 勘定科目: 手動入力がなければ経費項目コードから自動計算
+      if (updates.itemCode && !updates.accountTitle) {
           var key = String(updates.itemCode) + '_' + String(jobType);
           updates.accountTitle = titleMap[key] || '';
       }
@@ -185,6 +190,7 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
           if (idxItemName > -1) keiriDetailSheet.getRange(row, idxItemName + 1).setValue(updates.itemName);
           if (idxRemarks > -1) keiriDetailSheet.getRange(row, idxRemarks + 1).setValue(updates.remarks);
           if (idxAccount > -1) keiriDetailSheet.getRange(row, idxAccount + 1).setValue(updates.accountTitle);
+          if (idxTaxCategory > -1 && updates.taxCategory !== undefined) keiriDetailSheet.getRange(row, idxTaxCategory + 1).setValue(updates.taxCategory);
           break;
         }
       }
@@ -197,6 +203,8 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
             if (sIdxCard > -1) sourceSheet.getRange(sRow, sIdxCard + 1).setValue(updates.cardAmount);
             if (sIdxCode > -1) sourceSheet.getRange(sRow, sIdxCode + 1).setValue(updates.itemCode);
             if (sIdxRemarks > -1) sourceSheet.getRange(sRow, sIdxRemarks + 1).setValue(updates.remarks);
+            var sTaxColIdx = sIdxTaxCategory > -1 ? sIdxTaxCategory : sIdxTaxRate;
+            if (sTaxColIdx > -1 && updates.taxCategory !== undefined) sourceSheet.getRange(sRow, sTaxColIdx + 1).setValue(updates.taxCategory);
             break;
           }
         }
@@ -205,11 +213,11 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
 
     var currentDetails = getSheetData_(keiriDetailSheet);
     var targetDetails = currentDetails.filter(d => String(d['経理処理ID']) === String(keiriId));
-    
+
     var newTotal = targetDetails.reduce((sum, d) => sum + (parseFloat(String(d['金額']).replace(/,/g,'')) || 0), 0);
     var newCardTotal = targetDetails.reduce((sum, d) => sum + (parseFloat(String(d['カード利用額']).replace(/,/g,'')) || 0), 0);
     var newSettlement = newTotal - newCardTotal;
-      
+
     var hIdxId = hHeadersTmp.indexOf('経理処理ID');
     for (var j = 1; j < hDataRaw.length; j++) {
       if (String(hDataRaw[j][hIdxId]) === String(keiriId)) {
@@ -217,7 +225,7 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
         var hIdxTotal = hHeadersTmp.indexOf('合計金額');
         var hIdxCard = hHeadersTmp.indexOf('カード利用額');
         var hIdxSettle = hHeadersTmp.indexOf('精算金額');
-        
+
         if (hIdxTotal > -1) keiriHeaderSheet.getRange(rowNum, hIdxTotal + 1).setValue(newTotal);
         if (hIdxCard > -1) keiriHeaderSheet.getRange(rowNum, hIdxCard + 1).setValue(newCardTotal);
         if (hIdxSettle > -1) keiriHeaderSheet.getRange(rowNum, hIdxSettle + 1).setValue(newSettlement);
@@ -235,7 +243,7 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
 // -------------------------------------------------------
 
 function syncDataFromSources() {
-  var userInfo = checkAccess_(); 
+  var userInfo = checkAccess_();
   var totalNew = 0;
   var keiriHeaders = loadPendingHeaders_Internal_();
   var keiriIdMap = {};
@@ -243,7 +251,7 @@ function syncDataFromSources() {
 
   try { totalNew += syncFromSalesDB_(keiriIdMap); } catch (e) { Logger.log('Sales Sync Error: ' + e); }
   try { totalNew += syncFromGeneralDB_(keiriIdMap); } catch (e) { Logger.log('General Sync Error: ' + e); }
-  
+
   return { status: "success", message: "同期完了: " + totalNew + "件", totalNew: totalNew };
 }
 
@@ -254,7 +262,7 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var ss = SpreadsheetApp.openById(dbId);
   var headerSheet = ss.getSheetByName(names.HEADER || names.REPORTS);
   if (!headerSheet) return 0;
-  
+
   var range = headerSheet.getRange(1, 1, headerSheet.getLastRow(), headerSheet.getLastColumn());
   var allValues = range.getValues();
   var headers = allValues[0];
@@ -262,7 +270,7 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var idxFinal = headers.indexOf('最終ステータス');
   var idxId = headers.indexOf(idColName);
   var idxEmpId = headers.indexOf('申請者社員番号') > -1 ? headers.indexOf('申請者社員番号') : headers.indexOf('申請者ID');
-  
+
   var employeeMap = getEmployeeJobTypeMap_();
   var titleMap = getAccountTitleDefinitions_();
 
@@ -270,14 +278,14 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var newCount = 0;
   for (var i = 1; i < allValues.length; i++) {
     var row = allValues[i];
-    if (row[idxStatus] === '精算申請済') {
+    if (row[idxStatus] === '精算申請済' || row[idxStatus] === '承認済み') {
       var reportId = row[idxId];
-      var applicantId = idxEmpId > -1 ? row[idxEmpId] : null; 
-      
+      var applicantId = idxEmpId > -1 ? row[idxEmpId] : null;
+
       var existing = keiriIdMap[reportId];
       if (!existing || existing['経理ステータス'] === '経理差戻し') {
           var details = getReportDetails_(reportId, ss, names, idColName);
-          
+
           var jobType = applicantId ? employeeMap[applicantId] : null;
           details.expenses.forEach(function(ex) {
              var key = String(ex['経費項目コード']) + '_' + String(jobType);
@@ -287,8 +295,8 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
           var kId = existing ? existing['経理処理ID'] : 'PAY-' + Utilities.getUuid();
           if (existing) updateKeiriDB_OnResubmit_(kId, sysType, reportId, details, '振込待ち');
           else transferToKeiriDB_(kId, sysType, reportId, details, '振込待ち');
-          
-          headerSheet.getRange(i+1, idxFinal + 1).setValue('経理転記済');
+
+          if (idxFinal > -1) headerSheet.getRange(i+1, idxFinal + 1).setValue('経理転記済');
           newCount++;
       }
     }
@@ -304,31 +312,33 @@ function transferToKeiriDB_(keiriShoriID, systemType, reportId, details, keiriSt
   var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
   var hSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
   var dSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
-  
+  ensureDetailColumn_(dSheet, '税区分');
+
   var h = details.header;
   var expenses = details.expenses;
-  
+
   var cardTotal = expenses.reduce((sum, ex) => sum + (parseFloat(String(ex['カード利用額']).replace(/,/g,''))||0), 0);
   var totalAmount = parseFloat(String(h['合計金額'] || h['合計経費'] || 0).replace(/,/g,'')) || 0;
   var settleAmount = totalAmount - cardTotal;
-  
+
   var headerRow = [
-    keiriShoriID, systemType, reportId, h['申請日']||new Date(), h['申請者社員番号']||h['申請者ID'], h['担当者']||h['申請者'], 
+    keiriShoriID, systemType, reportId, h['申請日']||new Date(), h['申請者社員番号']||h['申請者ID'], h['担当者']||h['申請者'],
     (systemType === '営業用') ? (h['日付'] + " (" + (h['担当者']||'') + ")") : (h['件名']||h['日付']),
     totalAmount, keiriStatus, null, null, '',
     h['承認者名']||h['承認者']||'', h['精算方法']||'', cardTotal, settleAmount
   ];
   hSheet.appendRow(headerRow);
-  
+
   var detailRows = expenses.map(function(ex) {
     return [
-      keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'], 
-      ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName, 
+      keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
+      ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName,
       ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
-      ex['カード利用額']||0, 
+      ex['カード利用額']||0,
       ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
-      ex.accountTitle||'', 
-      ex['消費税率']||''
+      ex.accountTitle||'',
+      ex['消費税率']||'',
+      ex['税区分']||''
     ];
   });
   if (detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, detailRows[0].length).setValues(detailRows);
@@ -338,10 +348,11 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
     var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
     var hSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
     var dSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
-    
+    ensureDetailColumn_(dSheet, '税区分');
+
     var hData = hSheet.getDataRange().getValues();
     var hIdxId = hData[0].indexOf('経理処理ID');
-    
+
     var h = details.header;
     var expenses = details.expenses;
     var cardTotal = expenses.reduce((sum, ex) => sum + (parseFloat(String(ex['カード利用額']).replace(/,/g,''))||0), 0);
@@ -361,22 +372,23 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
             break;
         }
     }
-    
+
     var dData = dSheet.getDataRange().getValues();
     var dIdxId = dData[0].indexOf('経理処理ID');
     var rowsToDelete = [];
     for(var i=1; i<dData.length; i++) { if(dData[i][dIdxId] === keiriShoriID) rowsToDelete.push(i+1); }
     rowsToDelete.sort((a,b)=>b-a).forEach(r => dSheet.deleteRow(r));
-    
+
     var detailRows = expenses.map(function(ex) {
         return [
-            keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'], 
-            ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName, 
+            keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
+            ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName,
             ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
-            ex['カード利用額']||0, 
+            ex['カード利用額']||0,
             ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
-            ex.accountTitle||'', 
-            ex['消費税率']||''
+            ex.accountTitle||'',
+            ex['消費税率']||'',
+            ex['税区分']||''
         ];
     });
     if(detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, detailRows[0].length).setValues(detailRows);
@@ -423,7 +435,7 @@ function getReportDetails_(reportId, ss, names, idColName) {
   var header = hData.find(r => String(r[idColName]) === String(reportId));
   var dData = getSheetData_(ss.getSheetByName(names.EXPENSES));
   var expenses = dData.filter(r => String(r[idColName]) === String(reportId));
-  
+
   if(header) {
       header['申請者'] = header['申請者'] || header['申請者名'];
       header['合計金額'] = header['合計金額'] || header['合計経費'];
@@ -431,15 +443,23 @@ function getReportDetails_(reportId, ss, names, idColName) {
       // ★ 承認者名を結合するロジック (列名の揺れに対応)
       var app1 = header['承認者名1'] || header['承認者1'] || '';
       var app2 = header['承認者名2'] || header['承認者2'] || '';
-      
+
       var approverList = [];
       if (app1) approverList.push(app1);
       if (app2) approverList.push(app2);
-      
+
       // 結合した文字列をセット（transferToKeiriDB_ で保存される）
       header['承認者名'] = approverList.length > 0 ? approverList.join(' / ') : '';
   }
   return { header: header||{}, expenses: expenses };
+}
+
+function ensureDetailColumn_(sheet, colName) {
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (headers.indexOf(colName) === -1) {
+    sheet.getRange(1, lastCol + 1).setValue(colName);
+  }
 }
 
 function getSheetData_(sheet) {
@@ -476,9 +496,9 @@ function processStatusChange_(ids, name, status) {
     var count = 0, today = new Date();
     for (var i=1; i<data.length; i++) {
         if (targetIds.indexOf(data[i][idxId]) > -1) {
-            sheet.getRange(i+1, idxStat+1).setValue(status);
-            sheet.getRange(i+1, idxDate+1).setValue(today);
-            sheet.getRange(i+1, idxPerson+1).setValue(userInfo.name);
+            if (idxStat > -1) sheet.getRange(i+1, idxStat+1).setValue(status);
+            if (idxDate > -1) sheet.getRange(i+1, idxDate+1).setValue(today);
+            if (idxPerson > -1) sheet.getRange(i+1, idxPerson+1).setValue(userInfo.name);
             count++;
         }
     }
@@ -497,9 +517,9 @@ function markAsRejected(id, reason) {
         var targetRow=-1, origId, sys;
         for(var i=1; i<data.length; i++) { if(data[i][idxId]===id) { targetRow=i+1; origId=data[i][idxOrig]; sys=data[i][idxSys]; break; } }
         if(targetRow<0) throw new Error("IDなし");
-        
+
         sheet.getRange(targetRow, idxStat+1).setValue('経理差戻し');
-        
+
         var srcId = (sys==='営業用')?SALES_DB_ID:GENERAL_DATA_DB_ID;
         var srcName = (sys==='営業用')?SALES_SHEET_NAMES.HEADER:GENERAL_SHEET_NAMES.REPORTS;
         var srcSs = SpreadsheetApp.openById(srcId);
@@ -526,9 +546,9 @@ function exportPendingAsCSV() {
         var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
         var detailSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
         var detailData = getSheetData_(detailSheet);
-        
+
         var csvRows = [];
-        var csvHeader = ["システム","申請日","申請者","合計金額","精算金額","カード合計","経理ID","利用日","経費項目","金額","カード利用","備考"];
+        var csvHeader = ["システム","申請日","申請者","合計金額","精算金額","カード合計","経理ID","利用日","経費項目","勘定科目","税区分","金額","カード利用","備考"];
         csvRows.push(csvHeader.join(','));
 
         headers.forEach(h => {
@@ -536,7 +556,7 @@ function exportPendingAsCSV() {
             details.forEach(d => {
                 var row = [
                     h['システム区分'], h['申請日'], h['申請者名'], h['合計金額'], h['精算金額']||'', h['カード利用額']||'',
-                    h['経理処理ID'], d['利用日'], d['経費項目名'], d['金額'], d['カード利用額']||'', d['備考']
+                    h['経理処理ID'], d['利用日'], d['経費項目名'], d['勘定科目']||'', d['税区分']||d['消費税率']||'', d['金額'], d['カード利用額']||'', d['備考']
                 ];
                 csvRows.push(row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','));
             });

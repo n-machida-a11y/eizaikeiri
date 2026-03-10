@@ -10,7 +10,7 @@
         body { background-color: #f8f9fa; }
         .app-view { display: none; }
         .app-view.active { display: block; }
-        
+
         /* ローディング */
         #loading-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -18,11 +18,11 @@
             display: flex; justify-content: center; align-items: center;
             backdrop-filter: blur(2px);
         }
-        
+
         /* テーブル関連 */
         .text-break-word { word-break: break-all; }
         .table-hover tbody tr { cursor: pointer; transition: background-color 0.2s; }
-        
+
         /* 編集モード */
         .editing-row { background-color: #fff8e1 !important; }
         .edit-input { width: 100%; min-width: 70px; padding: 4px; border: 1px solid #ced4da; border-radius: 4px; }
@@ -33,10 +33,10 @@
         .info-value { font-size: 1.1rem; font-weight: 500; color: #212529; }
         .modal-header { border-bottom: none; padding-bottom: 0; }
         .system-badge { font-size: 0.75rem; padding: 0.25em 0.6em; }
-        
+
         /* 金額表示 */
         .amount-display { font-family: 'Segoe UI', sans-serif; }
-        
+
         /* ID非表示用クラス */
         .hidden-id { display: none !important; }
     </style>
@@ -69,7 +69,7 @@
             </div>
         <? } else { ?>
             <div id="view-main" class="app-view active">
-                
+
                 <div class="card shadow-sm border-0">
                     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
                         <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-list-check me-2"></i>支払待ち申請一覧</h5>
@@ -82,7 +82,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <div class="card-body p-0">
                         <div class="bg-light p-2 d-flex justify-content-between align-items-center border-bottom">
                             <div class="ps-3 fw-bold text-secondary" id="pending-count">- 件</div>
@@ -146,7 +146,7 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                 </div>
-                
+
                 <div class="modal-body bg-light">
                     <!-- ヘッダー情報カード -->
                     <div class="card mb-3 border-0 shadow-sm">
@@ -158,7 +158,7 @@
                                         <span id="detailSystemType" class="badge bg-secondary me-2 system-badge">システム</span>
                                         <h5 class="card-title mb-0 fw-bold text-dark" id="detailSubject">件名</h5>
                                     </div>
-                                    
+
                                     <div class="row g-3 mt-1">
                                         <div class="col-md-4 col-sm-6">
                                             <p class="info-label">申請者</p>
@@ -179,7 +179,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- 右側: 金額サマリ -->
                                 <div class="col-lg-4 text-lg-end mt-3 mt-lg-0 ps-lg-4">
                                     <p class="info-label mb-0">振込予定額 (精算金額)</p>
@@ -208,7 +208,7 @@
                                             <th style="width: 100px;">税込金額</th>
                                             <th style="width: 100px;">カード利用</th>
                                             <th style="width: 100px; background-color: #f0f8ff;">精算金額</th>
-                                            <th style="width: 50px;">税率</th>
+                                            <th style="min-width: 120px;">税区分</th>
                                             <th style="min-width: 150px;">備考</th>
                                             <th style="width: 50px;">画像</th>
                                         </tr>
@@ -221,7 +221,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="modal-footer bg-white">
                     <div class="me-auto">
                         <button type="button" class="btn btn-success d-none" id="saveChangesBtn" onclick="saveAllChanges()">
@@ -265,7 +265,7 @@
         var currentKeiriId = null;
         var currentHeader = null;
         var isEditMode = false;
-        
+
         var detailModal, rejectModal;
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -277,7 +277,7 @@
 
             document.getElementById('editModeSwitch').addEventListener('change', e => toggleEditMode(e.target.checked));
             document.getElementById('check-all').addEventListener('change', e => toggleAll(e.target.checked));
-            
+
             document.getElementById('detailProcessBtn').addEventListener('click', () => {
                 handleProcess(currentKeiriId);
                 detailModal.hide();
@@ -304,17 +304,17 @@
         function onLoadPendingDataSuccess(result) {
             showLoading(false);
             if (result.status === 'error') { alert(result.message); return; }
-            
+
             pendingData = result.data || [];
             var tbody = document.getElementById('pending-list-body');
             tbody.innerHTML = '';
-            
+
             if (pendingData.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" class="text-center p-5 text-muted">現在、支払待ちの申請はありません。</td></tr>';
                 document.getElementById('pending-count').textContent = '0 件';
                 return;
             }
-            
+
             pendingData.forEach(function(row) {
                 var tr = document.createElement('tr');
                 tr.onclick = (e) => { if(e.target.type !== 'checkbox' && e.target.tagName !== 'BUTTON') openDetailModal(row['経理処理ID']); };
@@ -347,7 +347,7 @@
             // 初期状態リセット
             document.getElementById('editModeSwitch').checked = false;
             isEditMode = false;
-            document.getElementById('saveChangesBtn').classList.add('d-none'); // 保存ボタン隠す
+            document.getElementById('saveChangesBtn').classList.add('d-none');
 
             // ヘッダー情報セット (一覧データで初期表示)
             document.getElementById('detailKeiriId').textContent = currentHeader['経理処理ID'];
@@ -355,10 +355,10 @@
             document.getElementById('detailApplicant').textContent = currentHeader['申請者名'];
             document.getElementById('detailApplyDate').textContent = formatDate(currentHeader['申請日']);
             document.getElementById('detailSubject').textContent = currentHeader['件名'];
-            
+
             // 承認者名 (揺れに対応)
             document.getElementById('detailApprover').textContent = currentHeader['承認者名'] || currentHeader['承認者'] || '-';
-            
+
             // 金額情報 (ヘッダー: 一旦一覧データで表示)
             document.getElementById('detailTotalAmount').textContent = formatNumber(currentHeader['合計金額']);
             document.getElementById('detailCardTotal').textContent = formatNumber(currentHeader['カード利用額'] || 0);
@@ -369,7 +369,6 @@
                 showLoading(false);
                 if (res.status === 'success') {
                     renderDetails(res.details);
-                    // ★追加: 明細データ取得後に合計を再計算してヘッダー表示をリフレッシュする
                     updateHeaderAmountsFromDetails(res.details);
                     detailModal.show();
                 } else {
@@ -381,14 +380,13 @@
         function renderDetails(details) {
             var tbody = document.getElementById('reportDetailsBody');
             tbody.innerHTML = '';
-            
+
             details.forEach(detail => {
                 var tr = document.createElement('tr');
                 tr.dataset.detailId = detail['明細ID'];
-                
+
                 var receipt = detail['領収書URL'] ? `<a href="${detail['領収書URL']}" target="_blank" class="text-primary"><i class="bi bi-image"></i></a>` : '<span class="text-muted">-</span>';
-                
-                // GAS側で計算済みの数値があればそれを使う (優先)
+
                 var amountVal = (detail.amount !== undefined) ? detail.amount : parseCurrency(detail['金額']);
                 var cardVal = (detail.cardAmount !== undefined) ? detail.cardAmount : parseCurrency(detail['カード利用額']);
                 var settleVal = (detail.settlementAmount !== undefined) ? detail.settlementAmount : (amountVal - cardVal);
@@ -396,33 +394,35 @@
                 var cardText = cardVal > 0 ? `<span class="text-danger">${formatNumber(cardVal)}</span>` : '<span class="text-muted">-</span>';
                 var settleText = settleVal !== 0 ? formatNumber(settleVal) : '<span class="text-muted">0</span>';
 
+                var accountTitleVal = detail.accountTitle || detail['勘定科目'] || '';
+                var taxCategoryVal = detail.taxCategory || detail['消費税率'] || '';
+
                 tr.innerHTML = `
                     <td>${formatDate(detail['利用日'])}</td>
-                    <td class="cell-item" data-val="${detail['経費項目コード']}">${detail['経費項目名']}</td>
-                    <td class="small text-muted">${detail['勘定科目'] || '-'}</td>
+                    <td class="cell-item" data-val="${escapeHtml(detail['経費項目コード'])}">${escapeHtml(detail['経費項目名'])}</td>
+                    <td class="cell-account small text-muted" data-val="${escapeHtml(accountTitleVal)}">${escapeHtml(accountTitleVal) || '-'}</td>
                     <td class="cell-amount text-end fw-bold amount-display" data-val="${amountVal}">${formatNumber(amountVal)}</td>
                     <td class="cell-card text-end" data-val="${cardVal}">${cardText}</td>
                     <td class="text-end fw-bold text-primary amount-display" style="background-color: #f0f8ff;">${settleText}</td>
-                    <td class="cell-tax text-center small">${detail['消費税率'] || '-'}</td>
-                    <td class="cell-remarks text-break-word small" data-val="${detail['備考']}">${detail['備考'] || ''}</td>
+                    <td class="cell-tax text-center small" data-val="${escapeHtml(taxCategoryVal)}">${escapeHtml(taxCategoryVal) || '-'}</td>
+                    <td class="cell-remarks text-break-word small" data-val="${escapeHtml(detail['備考'])}">${escapeHtml(detail['備考'])}</td>
                     <td class="text-center">${receipt}</td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
-        // ★追加: 明細データからヘッダー合計を再計算して表示
         function updateHeaderAmountsFromDetails(details) {
             var totalAmount = 0;
             var totalCard = 0;
-            
+
             details.forEach(function(d) {
                 var amt = (d.amount !== undefined) ? d.amount : parseCurrency(d['金額']);
                 var crd = (d.cardAmount !== undefined) ? d.cardAmount : parseCurrency(d['カード利用額']);
                 totalAmount += amt;
                 totalCard += crd;
             });
-            
+
             var totalSettle = totalAmount - totalCard;
 
             document.getElementById('detailTotalAmount').textContent = formatNumber(totalAmount);
@@ -430,7 +430,6 @@
             document.getElementById('detailSettlementAmount').textContent = formatNumber(totalSettle);
         }
 
-        // 数値を安全にパースする (カンマ除去)
         function parseCurrency(val) {
             if (!val) return 0;
             if (typeof val === 'number') return val;
@@ -441,31 +440,33 @@
             isEditMode = enabled;
             var rows = document.querySelectorAll('#reportDetailsBody tr');
             var saveBtn = document.getElementById('saveChangesBtn');
-            
+
             if (enabled) {
-                saveBtn.classList.remove('d-none'); // 保存ボタン表示
+                saveBtn.classList.remove('d-none');
             } else {
-                saveBtn.classList.add('d-none'); // 保存ボタン非表示
+                saveBtn.classList.add('d-none');
             }
 
             rows.forEach(row => {
                 var cellAmount = row.querySelector('.cell-amount');
                 var cellCard = row.querySelector('.cell-card');
                 var cellItem = row.querySelector('.cell-item');
+                var cellAccount = row.querySelector('.cell-account');
+                var cellTax = row.querySelector('.cell-tax');
                 var cellRemarks = row.querySelector('.cell-remarks');
 
                 if (enabled) {
                     row.classList.add('editing-row');
-                    
+
                     // 金額
                     var amountVal = cellAmount.dataset.val;
                     cellAmount.innerHTML = `<input type="number" class="edit-input text-end" value="${amountVal}">`;
-                    
+
                     // カード利用額
                     var cardVal = cellCard.dataset.val;
                     cellCard.innerHTML = `<input type="number" class="edit-input text-end" value="${cardVal}" placeholder="0">`;
 
-                    // 項目 (プルダウン)
+                    // 経費項目 (プルダウン)
                     var currentCode = cellItem.dataset.val;
                     var selectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
                     expenseMasterList.forEach(m => {
@@ -475,6 +476,21 @@
                     selectHtml += `</select>`;
                     cellItem.innerHTML = selectHtml;
 
+                    // 勘定科目 (テキスト入力)
+                    var accountVal = cellAccount.dataset.val || '';
+                    cellAccount.innerHTML = `<input type="text" class="form-control form-control-sm" value="${accountVal}" placeholder="例: 旅費交通費" style="min-width:120px;">`;
+
+                    // 税区分 (プルダウン)
+                    var taxVal = cellTax.dataset.val || '';
+                    var taxOptions = ['', '課税仕入（10%）', '課税仕入（軽減税率8%）', '非課税', '免税', '対象外'];
+                    var taxSelectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
+                    taxOptions.forEach(function(opt) {
+                        var selected = opt === taxVal ? 'selected' : '';
+                        taxSelectHtml += `<option value="${opt}" ${selected}>${opt || '-- 選択 --'}</option>`;
+                    });
+                    taxSelectHtml += `</select>`;
+                    cellTax.innerHTML = taxSelectHtml;
+
                     // 備考
                     var remarksVal = cellRemarks.dataset.val || '';
                     cellRemarks.innerHTML = `<input type="text" class="form-control form-control-sm" value="${remarksVal}">`;
@@ -483,8 +499,8 @@
                     row.classList.remove('editing-row');
                 }
             });
-            
-            if (!enabled) openDetailModal(currentKeiriId); // 元に戻すためリロード
+
+            if (!enabled) openDetailModal(currentKeiriId);
         }
 
         // --- 一括保存 ---
@@ -496,30 +512,34 @@
 
             rows.forEach(row => {
                 var detailId = row.dataset.detailId;
-                
+
                 var inputAmount = row.querySelector('.cell-amount input');
                 var inputCard = row.querySelector('.cell-card input');
                 var selectItem = row.querySelector('.cell-item select');
+                var inputAccount = row.querySelector('.cell-account input');
+                var selectTax = row.querySelector('.cell-tax select');
                 var inputRemarks = row.querySelector('.cell-remarks input');
 
-                // 編集モードでない場合はスキップ（念のため）
                 if (!inputAmount) return;
 
                 var newAmount = inputAmount.value;
                 var newCard = inputCard.value || 0;
                 var newItemCode = selectItem.value;
+                var newAccountTitle = inputAccount ? inputAccount.value : undefined;
+                var newTaxCategory = selectTax ? selectTax.value : undefined;
                 var newRemarks = inputRemarks.value;
-                
+
                 var master = expenseMasterList.find(m => m.code == newItemCode);
                 var newItemName = master ? master.name : '';
 
-                // すべての行のデータを収集
                 updatesList.push({
                     detailId: detailId,
                     amount: newAmount,
                     cardAmount: newCard,
                     itemCode: newItemCode,
                     itemName: newItemName,
+                    accountTitle: newAccountTitle,
+                    taxCategory: newTaxCategory,
                     remarks: newRemarks
                 });
             });
@@ -535,8 +555,7 @@
                     showLoading(false);
                     if (res.status === 'success') {
                         alert(res.message);
-                        if (res.newTotal) document.getElementById('detailSettlementAmount').textContent = formatNumber(res.newTotal); 
-                        // 編集モードを終了してリロード
+                        if (res.newTotal) document.getElementById('detailSettlementAmount').textContent = formatNumber(res.newTotal);
                         toggleEditMode(false);
                         loadPendingData();
                     } else {
@@ -549,7 +568,10 @@
         // --- 共通 ---
         function handleSyncData() {
             showLoading(true);
-            google.script.run.withSuccessHandler(res => { showLoading(false); alert(res.message); loadPendingData(); }).syncDataFromSources();
+            google.script.run
+                .withSuccessHandler(res => { showLoading(false); alert(res.message); loadPendingData(); })
+                .withFailureHandler(e => { showLoading(false); alert('同期エラー: ' + e.message); })
+                .syncDataFromSources();
         }
 
         function handleBulkProcess() {
@@ -603,6 +625,10 @@
         function formatNumber(num) { return (parseFloat(num)||0).toLocaleString('ja-JP'); }
         function formatDate(d) { return d ? d.toString().substring(0, 10).replace(/-/g, '/') : ''; }
         function toggleAll(chk) { document.querySelectorAll('.pending-checkbox').forEach(c => c.checked = chk); }
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
     </script>
 </body>
 </html>
