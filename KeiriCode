@@ -203,8 +203,8 @@ function updateDetailItems(keiriId, updatesList, systemType, originalReportId) {
             if (sIdxCard > -1) sourceSheet.getRange(sRow, sIdxCard + 1).setValue(updates.cardAmount);
             if (sIdxCode > -1) sourceSheet.getRange(sRow, sIdxCode + 1).setValue(updates.itemCode);
             if (sIdxRemarks > -1) sourceSheet.getRange(sRow, sIdxRemarks + 1).setValue(updates.remarks);
-            var sTaxColIdx = sIdxTaxCategory > -1 ? sIdxTaxCategory : sIdxTaxRate;
-            if (sTaxColIdx > -1 && updates.taxCategory !== undefined) sourceSheet.getRange(sRow, sTaxColIdx + 1).setValue(updates.taxCategory);
+            // 税区分のみ書き戻す（消費税率列への混入を防ぐ）
+            if (sIdxTaxCategory > -1 && updates.taxCategory !== undefined) sourceSheet.getRange(sRow, sIdxTaxCategory + 1).setValue(updates.taxCategory);
             break;
           }
         }
@@ -363,8 +363,10 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
         if (hData[i][hIdxId] === keiriShoriID) {
             var row = i+1;
             var hHeaders = hData[0];
-            hSheet.getRange(row, hHeaders.indexOf('経理ステータス')+1).setValue(newStatus);
-            hSheet.getRange(row, hHeaders.indexOf('合計金額')+1).setValue(totalAmount);
+            var idxStatus_ = hHeaders.indexOf('経理ステータス');
+            var idxTotal_ = hHeaders.indexOf('合計金額');
+            if (idxStatus_ > -1) hSheet.getRange(row, idxStatus_+1).setValue(newStatus);
+            if (idxTotal_ > -1) hSheet.getRange(row, idxTotal_+1).setValue(totalAmount);
             var idxCard = hHeaders.indexOf('カード利用額');
             var idxSettle = hHeaders.indexOf('精算金額');
             if(idxCard > -1) hSheet.getRange(row, idxCard+1).setValue(cardTotal);
@@ -497,10 +499,11 @@ function processStatusChange_(ids, name, status) {
     var data = sheet.getDataRange().getValues();
     var h = data[0];
     var idxId = h.indexOf('経理処理ID'), idxStat = h.indexOf('経理ステータス'), idxDate = h.indexOf('処理日'), idxPerson = h.indexOf('担当経理');
+    if (idxStat === -1) return { status: "error", message: "経理ステータス列が見つかりません。" };
     var count = 0, today = new Date();
     for (var i=1; i<data.length; i++) {
         if (targetIds.indexOf(data[i][idxId]) > -1) {
-            if (idxStat > -1) sheet.getRange(i+1, idxStat+1).setValue(status);
+            sheet.getRange(i+1, idxStat+1).setValue(status);
             if (idxDate > -1) sheet.getRange(i+1, idxDate+1).setValue(today);
             if (idxPerson > -1) sheet.getRange(i+1, idxPerson+1).setValue(userInfo.name);
             count++;
@@ -522,6 +525,7 @@ function markAsRejected(id, reason) {
         for(var i=1; i<data.length; i++) { if(data[i][idxId]===id) { targetRow=i+1; origId=data[i][idxOrig]; sys=data[i][idxSys]; break; } }
         if(targetRow<0) throw new Error("IDなし");
 
+        if (idxStat === -1) throw new Error("経理ステータス列が見つかりません。");
         sheet.getRange(targetRow, idxStat+1).setValue('経理差戻し');
 
         var srcId = (sys==='営業用')?SALES_DB_ID:GENERAL_DATA_DB_ID;

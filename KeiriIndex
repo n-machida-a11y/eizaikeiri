@@ -392,17 +392,18 @@
                 filtered.forEach(function(row) {
                     var tr = document.createElement('tr');
                     tr.onclick = (e) => { if(e.target.type !== 'checkbox' && e.target.tagName !== 'BUTTON') openDetailModal(row['経理処理ID']); };
+                    var safeId = escapeHtml(row['経理処理ID']);
                     tr.innerHTML = `
                         <td class="text-center" onclick="event.stopPropagation()">
-                            <input class="form-check-input pending-checkbox" type="checkbox" value="${row['経理処理ID']}">
+                            <input class="form-check-input pending-checkbox" type="checkbox" value="${safeId}">
                         </td>
                         <td>${formatDate(row['申請日'])}</td>
-                        <td><span class="badge bg-secondary system-badge">${row['システム区分']}</span></td>
-                        <td class="fw-medium">${row['申請者名']}</td>
-                        <td><div class="text-truncate" style="max-width: 300px;">${row['件名']}</div></td>
+                        <td><span class="badge bg-secondary system-badge">${escapeHtml(row['システム区分'])}</span></td>
+                        <td class="fw-medium">${escapeHtml(row['申請者名'])}</td>
+                        <td><div class="text-truncate" style="max-width: 300px;">${escapeHtml(row['件名'])}</div></td>
                         <td class="text-end fw-bold amount-display">${formatNumber(row['合計金額'])}</td>
                         <td class="text-center">
-                            <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="event.stopPropagation(); openDetailModal('${row['経理処理ID']}')">詳細</button>
+                            <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="event.stopPropagation(); openDetailModal('${safeId}')">詳細</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -463,9 +464,10 @@
                 var tr = document.createElement('tr');
                 tr.dataset.detailId = detail['明細ID'];
 
-                // 領収書: 新規ウィンドウで開く
-                var receipt = detail['領収書URL']
-                    ? `<a href="#" onclick="window.open('${detail['領収書URL']}','receipt','width=900,height=700,scrollbars=yes,resizable=yes'); return false;" class="text-primary"><i class="bi bi-image"></i></a>`
+                // 領収書: data-url属性でURLを保持し、行追加後にリスナーを付与
+                var receiptUrl = detail['領収書URL'] || '';
+                var receipt = receiptUrl
+                    ? `<a href="#" class="text-primary receipt-link" data-url="${escapeHtml(receiptUrl)}"><i class="bi bi-image"></i></a>`
                     : '<span class="text-muted">-</span>';
 
                 var amountVal = (detail.amount !== undefined) ? detail.amount : parseCurrency(detail['金額']);
@@ -490,6 +492,13 @@
                     <td class="text-center">${receipt}</td>
                 `;
                 tbody.appendChild(tr);
+                // 領収書リンクにイベントリスナーを付与（URLをHTML属性に含めない）
+                tr.querySelectorAll('.receipt-link').forEach(function(link) {
+                    link.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        window.open(this.dataset.url, 'receipt', 'width=900,height=700,scrollbars=yes,resizable=yes');
+                    });
+                });
             });
         }
 
@@ -522,6 +531,9 @@
                 var cellAccount = row.querySelector('.cell-account');
                 var cellTax = row.querySelector('.cell-tax');
                 var cellRemarks = row.querySelector('.cell-remarks');
+
+                // 明細ロード前のスピナー行はスキップ
+                if (!cellAmount || !cellCard || !cellItem) return;
 
                 if (enabled) {
                     row.classList.add('editing-row');
@@ -636,7 +648,7 @@
                 showLoading(false);
                 showToast(res.message, res.status === 'error');
                 if (res.status === 'success') {
-                    detailModal.hide();
+                    if (document.getElementById('reportDetailModal').classList.contains('show')) detailModal.hide();
                     removeItemsFromList(currentKeiriId);
                 }
             }).markAsRejected(currentKeiriId, reason);
