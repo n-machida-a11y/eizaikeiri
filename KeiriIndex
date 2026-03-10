@@ -603,6 +603,10 @@
         }
 
         function exportData() {
+            var checkedIds = Array.from(document.querySelectorAll('.pending-checkbox:checked')).map(c => c.value);
+            var targetLabel = checkedIds.length > 0 ? checkedIds.length + '件（選択中）' : '全件';
+            if (!confirm(targetLabel + 'をCSV出力しますか？')) return;
+
             showLoading(true);
             google.script.run.withSuccessHandler(res=>{
                 showLoading(false);
@@ -612,7 +616,7 @@
                     a.download = res.fileName;
                     a.click();
                 } else alert(res.message);
-            }).exportPendingAsCSV();
+            }).exportPendingAsCSV(checkedIds.length > 0 ? checkedIds : null);
         }
 
         function handleProcess(id) {

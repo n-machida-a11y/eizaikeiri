@@ -278,7 +278,7 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var newCount = 0;
   for (var i = 1; i < allValues.length; i++) {
     var row = allValues[i];
-    if (row[idxStatus] === '精算申請済' || row[idxStatus] === '承認済み') {
+    if (row[idxStatus] === '精算申請済' || row[idxStatus] === '承認済') {
       var reportId = row[idxId];
       var applicantId = idxEmpId > -1 ? row[idxEmpId] : null;
 
@@ -539,10 +539,15 @@ function markAsRejected(id, reason) {
     } catch(e) { return { status: "error", message: e.message }; } finally { lock.releaseLock(); }
 }
 
-function exportPendingAsCSV() {
+// selectedIds: 指定があればその経理処理IDのみ出力、null/空なら全件
+function exportPendingAsCSV(selectedIds) {
     checkAccess_();
     try {
-        var headers = loadPendingHeaders_Internal_().filter(h => h['経理ステータス'] === '振込待ち');
+        var allHeaders = loadPendingHeaders_Internal_().filter(h => h['経理ステータス'] === '振込待ち');
+        var headers = (selectedIds && selectedIds.length > 0)
+            ? allHeaders.filter(h => selectedIds.indexOf(h['経理処理ID']) > -1)
+            : allHeaders;
+
         var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
         var detailSheet = ss.getSheetByName(KEIRI_SHEET_NAMES.DETAILS);
         var detailData = getSheetData_(detailSheet);
@@ -562,6 +567,7 @@ function exportPendingAsCSV() {
             });
         });
         var fn = 'keiri_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMdd') + '.csv';
-        return { status: "success", csvData: csvRows.join('\n'), fileName: fn };
+        // BOM付きUTF-8でExcelの文字化けを防止
+        return { status: "success", csvData: '\uFEFF' + csvRows.join('\n'), fileName: fn };
     } catch(e) { return { status: "error", message: e.message }; }
 }
