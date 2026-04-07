@@ -75,20 +75,19 @@ function getReportDetailsForKeiri(keiriShoriID) {
     var detailData = getSheetData_(dSheet);
     var filteredDetails = detailData.filter(function(row) { return String(row['経理処理ID']) === String(keiriShoriID); });
 
-    var employeeMap = getEmployeeJobTypeMap_();
-    var titleMap = getAccountTitleDefinitions_();
-    var taxCategoryMap = getTaxCategoryDefinitions_();
-    var jobType = applicantId ? employeeMap[applicantId] : null;
+    // マスタを一括取得 (スプレッドシートを1回だけ開く)
+    var masters = getMasterDataAll_();
+    var jobType = applicantId ? masters.employeeMap[applicantId] : null;
 
     filteredDetails = filteredDetails.map(function(d) {
       // 科目解決
       var code = d['経費項目コード'];
       var key = String(code) + '_' + String(jobType);
-      var masterAccountTitle = titleMap[key] || '';
+      var masterAccountTitle = masters.titleMap[key] || '';
       d.accountTitle = d['勘定科目'] || masterAccountTitle;
 
       d.taxRate = d['消費税率'] || '';
-      d.taxCategory = d['税区分'] || taxCategoryMap[String(code)] || d['消費税率'] || '';
+      d.taxCategory = d['税区分'] || masters.taxCategoryMap[String(code)] || d['消費税率'] || '';
       d.itemName = d['経費項目名'] || '';
 
       // 数値補正
@@ -273,17 +272,12 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var idxId = headers.indexOf(idColName);
   var idxEmpId = headers.indexOf('申請者社員番号') > -1 ? headers.indexOf('申請者社員番号') : headers.indexOf('申請者ID');
 
-  var employeeMap = getEmployeeJobTypeMap_();
-  var titleMap = getAccountTitleDefinitions_();
-  var taxCategoryMap = getTaxCategoryDefinitions_();
-
-  // 経費項目名マップ（コード→名称）: 経費項目名を持たないアプリからの同期に対応
-  var itemNameMap = {};
-  var masterSheet = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID).getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION);
-  getSheetData_(masterSheet).forEach(function(row) {
-    var code = String(row['経費項目コード']);
-    if (code && !itemNameMap[code]) itemNameMap[code] = row['経費項目'] || '';
-  });
+  // マスタデータ一括取得
+  var masters = getMasterDataAll_();
+  var employeeMap = masters.employeeMap;
+  var titleMap = masters.titleMap;
+  var taxCategoryMap = masters.taxCategoryMap;
+  var itemNameMap = masters.itemNameMap;
 
   if (idxStatus === -1) return 0;
   var newCount = 0;
@@ -449,49 +443,43 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
 
 // --- 共通マスタヘルパー ---
 
-function getEmployeeJobTypeMap_() {
+// マスタデータ一括取得 (スプレッドシートを1回・シートを2回だけ読む)
+function getMasterDataAll_() {
   var ss = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID);
-  var sheet = ss.getSheetByName(MASTER_SHEET_NAMES.EMPLOYEES);
-  var data = getSheetData_(sheet);
-  var map = {};
-  data.forEach(function(row) {
-    if (row['社員番号']) {
-      map[row['社員番号']] = row['職種区分'];
-    }
-  });
-  return map;
-}
 
-function getAccountTitleDefinitions_() {
-  var ss = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID);
-  var sheet = ss.getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION);
-  var data = getSheetData_(sheet);
-  var map = {};
-  data.forEach(function(row) {
+  // 社員マスタ
+  var empData = getSheetData_(ss.getSheetByName(MASTER_SHEET_NAMES.EMPLOYEES));
+  var employeeMap = {};
+  empData.forEach(function(row) {
+    if (row['社員番号']) employeeMap[row['社員番号']] = row['職種区分'];
+  });
+
+  // 経費項目パターン (勘定科目・税区分・項目名を1回の読み込みで構築)
+  var expData = getSheetData_(ss.getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION));
+  var titleMap = {};
+  var taxCategoryMap = {};
+  var itemNameMap = {};
+  expData.forEach(function(row) {
     var code = row['経費項目コード'];
-    var jobType = row['職種区分'];
     if (code) {
-      var key = String(code) + '_' + String(jobType);
-      map[key] = row['借方科目名'];
+      var codeStr = String(code);
+      var key = codeStr + '_' + String(row['職種区分']);
+      titleMap[key] = row['借方科目名'];
+      if (!taxCategoryMap[codeStr]) {
+        taxCategoryMap[codeStr] = row['消費税選択区分名'] || '';
+      }
+      if (!itemNameMap[codeStr]) {
+        itemNameMap[codeStr] = row['経費項目'] || '';
+      }
     }
   });
-  return map;
+
+  return { employeeMap: employeeMap, titleMap: titleMap, taxCategoryMap: taxCategoryMap, itemNameMap: itemNameMap };
 }
 
-function getTaxCategoryDefinitions_() {
-  var ss = SpreadsheetApp.openById(GENERAL_MASTER_DB_ID);
-  var sheet = ss.getSheetByName(MASTER_SHEET_NAMES.EXPENSE_DEFINITION);
-  var data = getSheetData_(sheet);
-  var map = {};
-  data.forEach(function(row) {
-    var code = row['経費項目コード'];
-    // 税区分は職種によらず同一のため経費項目コードのみをキーとする
-    if (code && !map[String(code)]) {
-      map[String(code)] = row['消費税選択区分名'] || '';
-    }
-  });
-  return map;
-}
+function getEmployeeJobTypeMap_() { return getMasterDataAll_().employeeMap; }
+function getAccountTitleDefinitions_() { return getMasterDataAll_().titleMap; }
+function getTaxCategoryDefinitions_() { return getMasterDataAll_().taxCategoryMap; }
 
 // --- その他ヘルパー ---
 
@@ -519,6 +507,15 @@ function getReportDetails_(reportId, ss, names, idColName) {
       // 結合した文字列をセット（transferToKeiriDB_ で保存される）
       header['承認者名'] = approverList.length > 0 ? approverList.join(' / ') : '';
   }
+
+  // 元システムの列名揺れを正規化 (領収書URL・備考・カード利用額)
+  expenses.forEach(function(ex) {
+    ex['領収書URL'] = ex['領収書URL'] || ex['画像URL'] || ex['添付URL'] || ex['レシートURL'] || '';
+    ex['備考'] = ex['備考'] || ex['メモ'] || ex['コメント'] || '';
+    ex['カード利用額'] = ex['カード利用額'] || ex['カード'] || 0;
+    ex['エリアコード'] = ex['エリアコード'] || ex['地域区分コード'] || ex['宿泊エリアコード'] || '';
+  });
+
   return { header: header||{}, expenses: expenses };
 }
 
