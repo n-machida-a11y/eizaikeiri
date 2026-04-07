@@ -289,7 +289,7 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
   var newCount = 0;
   for (var i = 1; i < allValues.length; i++) {
     var row = allValues[i];
-    if (row[idxStatus] === '精算申請済' || row[idxStatus] === '承認済') {
+    if (row[idxStatus] === '精算申請済' || row[idxStatus] === '承認済' || row[idxStatus] === '承認済み') {
       var reportId = row[idxId];
       var applicantId = idxEmpId > -1 ? row[idxEmpId] : null;
 
@@ -306,6 +306,13 @@ function syncDB_(dbId, names, keiriIdMap, sysType, idColName) {
              ex.itemName = ex.itemName || ex['経費項目名'] || itemNameMap[code] || '';
              // 税区分: シート列名「消費税区分」(一般経費アプリ) または「税区分」に対応
              ex['税区分'] = ex['税区分'] || ex['消費税区分'] || taxCategoryMap[code] || '';
+             // 備考にURLが含まれている場合、領収書URLフィールドに分離
+             var biko = String(ex['備考'] || '');
+             var urlMatch = biko.match(/https?:\/\/\S+/);
+             if (urlMatch && !ex['領収書URL']) {
+               ex['領収書URL'] = urlMatch[0];
+               ex['備考'] = biko.replace(urlMatch[0], '').trim();
+             }
           });
 
           var kId = existing ? existing['経理処理ID'] : 'PAY-' + Utilities.getUuid();
@@ -345,19 +352,33 @@ function transferToKeiriDB_(keiriShoriID, systemType, reportId, details, keiriSt
   ];
   hSheet.appendRow(headerRow);
 
+  // ヘッダー名ベースで列インデックスを解決して書き込み
+  var dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
   var detailRows = expenses.map(function(ex) {
-    return [
-      keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
-      ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName||ex['経費項目名']||'',
-      ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
-      ex['カード利用額']||0,
-      ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
-      ex.accountTitle||'',
-      ex['消費税率']||'',
-      ex['税区分']||''
-    ];
+    var row = new Array(dHeaders.length).fill('');
+    var map = {
+      '経理処理ID': keiriShoriID,
+      '元申請ID': reportId,
+      '明細ID': ex.expenseId||ex['明細ID']||ex['経費ID']||'',
+      '利用日': ex.useDate||ex['利用日']||'',
+      '経費項目コード': ex.itemCode||ex['経費項目コード']||'',
+      '経費項目名': ex.itemName||ex['経費項目名']||'',
+      '金額': ex.amount||ex['金額']||0,
+      '税抜金額': ex['税抜金額']||'',
+      '消費税': ex['消費税']||'',
+      'カード利用額': ex['カード利用額']||0,
+      'エリアコード': ex.areaCode||ex['エリアコード']||'',
+      '備考': ex.remarks||ex['備考']||'',
+      '領収書URL': ex.receiptUrl||ex['領収書URL']||'',
+      '勘定科目': ex.accountTitle||'',
+      '税区分': ex['税区分']||''
+    };
+    dHeaders.forEach(function(colName, idx) {
+      if (map.hasOwnProperty(colName)) row[idx] = map[colName];
+    });
+    return row;
   });
-  if (detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, detailRows[0].length).setValues(detailRows);
+  if (detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, dHeaders.length).setValues(detailRows);
 }
 
 function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, newStatus) {
@@ -397,19 +418,33 @@ function updateKeiriDB_OnResubmit_(keiriShoriID, systemType, reportId, details, 
     for(var i=1; i<dData.length; i++) { if(dData[i][dIdxId] === keiriShoriID) rowsToDelete.push(i+1); }
     rowsToDelete.sort((a,b)=>b-a).forEach(r => dSheet.deleteRow(r));
 
+    // ヘッダー名ベースで列インデックスを解決して書き込み
+    var dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
     var detailRows = expenses.map(function(ex) {
-        return [
-            keiriShoriID, reportId, ex.expenseId||ex['明細ID']||ex['経費ID'],
-            ex.useDate||ex['利用日'], ex.itemCode||ex['経費項目コード'], ex.itemName||ex['経費項目名']||'',
-            ex.amount||ex['金額'], ex['税抜金額']||null, ex['消費税']||null,
-            ex['カード利用額']||0,
-            ex.areaCode||ex['エリアコード']||null, ex.remarks||ex['備考'], ex.receiptUrl||ex['領収書URL'],
-            ex.accountTitle||'',
-            ex['消費税率']||'',
-            ex['税区分']||''
-        ];
+        var row = new Array(dHeaders.length).fill('');
+        var map = {
+          '経理処理ID': keiriShoriID,
+          '元申請ID': reportId,
+          '明細ID': ex.expenseId||ex['明細ID']||ex['経費ID']||'',
+          '利用日': ex.useDate||ex['利用日']||'',
+          '経費項目コード': ex.itemCode||ex['経費項目コード']||'',
+          '経費項目名': ex.itemName||ex['経費項目名']||'',
+          '金額': ex.amount||ex['金額']||0,
+          '税抜金額': ex['税抜金額']||'',
+          '消費税': ex['消費税']||'',
+          'カード利用額': ex['カード利用額']||0,
+          'エリアコード': ex.areaCode||ex['エリアコード']||'',
+          '備考': ex.remarks||ex['備考']||'',
+          '領収書URL': ex.receiptUrl||ex['領収書URL']||'',
+          '勘定科目': ex.accountTitle||'',
+          '税区分': ex['税区分']||''
+        };
+        dHeaders.forEach(function(colName, idx) {
+          if (map.hasOwnProperty(colName)) row[idx] = map[colName];
+        });
+        return row;
     });
-    if(detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, detailRows[0].length).setValues(detailRows);
+    if(detailRows.length > 0) dSheet.getRange(dSheet.getLastRow()+1, 1, detailRows.length, dHeaders.length).setValues(detailRows);
 }
 
 // --- 共通マスタヘルパー ---
@@ -524,23 +559,28 @@ function loadPendingHeaders(statusFilter) {
 function markAsProcessed(ids, name) { return processStatusChange_(ids, name, '振込済'); }
 function processStatusChange_(ids, name, status) {
     var userInfo = checkAccess_();
-    var targetIds = Array.isArray(ids) ? ids : [ids];
-    var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
-    var sheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
-    var data = sheet.getDataRange().getValues();
-    var h = data[0];
-    var idxId = h.indexOf('経理処理ID'), idxStat = h.indexOf('経理ステータス'), idxDate = h.indexOf('処理日'), idxPerson = h.indexOf('担当経理');
-    if (idxStat === -1) return { status: "error", message: "経理ステータス列が見つかりません。" };
-    var count = 0, today = new Date();
-    for (var i=1; i<data.length; i++) {
-        if (targetIds.indexOf(data[i][idxId]) > -1) {
-            sheet.getRange(i+1, idxStat+1).setValue(status);
-            if (idxDate > -1) sheet.getRange(i+1, idxDate+1).setValue(today);
-            if (idxPerson > -1) sheet.getRange(i+1, idxPerson+1).setValue(userInfo.name);
-            count++;
-        }
-    }
-    return { status: "success", message: count + "件処理しました。" };
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(15000)) return { status: "error", message: "他ユーザーが処理中です。" };
+    try {
+      var targetIds = Array.isArray(ids) ? ids : [ids];
+      var ss = SpreadsheetApp.openById(KEIRI_DB_ID);
+      var sheet = ss.getSheetByName(KEIRI_SHEET_NAMES.HEADERS);
+      var data = sheet.getDataRange().getValues();
+      var h = data[0];
+      var idxId = h.indexOf('経理処理ID'), idxStat = h.indexOf('経理ステータス'), idxDate = h.indexOf('処理日'), idxPerson = h.indexOf('担当経理');
+      if (idxStat === -1) return { status: "error", message: "経理ステータス列が見つかりません。" };
+      var count = 0, today = new Date();
+      for (var i=1; i<data.length; i++) {
+          if (targetIds.indexOf(data[i][idxId]) > -1) {
+              sheet.getRange(i+1, idxStat+1).setValue(status);
+              if (idxDate > -1) sheet.getRange(i+1, idxDate+1).setValue(today);
+              if (idxPerson > -1) sheet.getRange(i+1, idxPerson+1).setValue(userInfo.name);
+              count++;
+          }
+      }
+      return { status: "success", message: count + "件処理しました。" };
+    } catch (e) { return { status: "error", message: e.message }; }
+    finally { lock.releaseLock(); }
 }
 
 function markAsRejected(id, reason) {
@@ -604,7 +644,12 @@ function exportPendingAsCSV(selectedIds, statusFilter) {
                     h['システム区分'], h['申請日'], h['申請者名'], h['合計金額'], h['精算金額']||'', h['カード利用額']||'',
                     h['経理処理ID'], d['利用日'], d['経費項目名'], d['勘定科目']||'', d['税区分']||d['消費税率']||'', d['金額'], d['カード利用額']||'', d['備考']
                 ];
-                csvRows.push(row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','));
+                csvRows.push(row.map(function(v) {
+                    var s = String(v).replace(/"/g, '""');
+                    // CSV injection対策: 数式として解釈される先頭文字をエスケープ
+                    if (/^[=+\-@]/.test(s)) s = "'" + s;
+                    return '"' + s + '"';
+                }).join(','));
             });
         });
         var fn = 'keiri_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMdd') + '.csv';

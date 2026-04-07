@@ -297,7 +297,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        var USER_NAME = '<?= userName ?>';
+        var USER_NAME = <?!= JSON.stringify(userName) ?>;
         var pendingData = [];
         var expenseMasterList = [];
         var currentKeiriId = null;
@@ -537,17 +537,47 @@
 
                 if (enabled) {
                     row.classList.add('editing-row');
-                    cellAmount.innerHTML = `<input type="number" class="edit-input text-end" value="${cellAmount.dataset.val}">`;
-                    cellCard.innerHTML = `<input type="number" class="edit-input text-end" value="${cellCard.dataset.val}" placeholder="0">`;
 
+                    // 金額 (数値なのでXSSリスク低いが統一的にDOM APIで設定)
+                    var amountInput = document.createElement('input');
+                    amountInput.type = 'number';
+                    amountInput.className = 'edit-input text-end';
+                    amountInput.value = cellAmount.dataset.val;
+                    cellAmount.textContent = '';
+                    cellAmount.appendChild(amountInput);
+
+                    var cardInput = document.createElement('input');
+                    cardInput.type = 'number';
+                    cardInput.className = 'edit-input text-end';
+                    cardInput.value = cellCard.dataset.val;
+                    cardInput.placeholder = '0';
+                    cellCard.textContent = '';
+                    cellCard.appendChild(cardInput);
+
+                    // 経費項目セレクト
                     var currentCode = cellItem.dataset.val;
-                    var selectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
-                    expenseMasterList.forEach(m => {
-                        selectHtml += `<option value="${m.code}" ${String(m.code) === String(currentCode) ? 'selected' : ''}>${m.name}</option>`;
+                    var itemSelect = document.createElement('select');
+                    itemSelect.className = 'form-select form-select-sm';
+                    itemSelect.style.minWidth = '140px';
+                    expenseMasterList.forEach(function(m) {
+                        var opt = document.createElement('option');
+                        opt.value = m.code;
+                        opt.textContent = m.name;
+                        if (String(m.code) === String(currentCode)) opt.selected = true;
+                        itemSelect.appendChild(opt);
                     });
-                    cellItem.innerHTML = selectHtml + '</select>';
+                    cellItem.textContent = '';
+                    cellItem.appendChild(itemSelect);
 
-                    cellAccount.innerHTML = `<input type="text" class="form-control form-control-sm" value="${cellAccount.dataset.val}" placeholder="例: 旅費交通費" style="min-width:120px;">`;
+                    // 勘定科目
+                    var accountInput = document.createElement('input');
+                    accountInput.type = 'text';
+                    accountInput.className = 'form-control form-control-sm';
+                    accountInput.value = cellAccount.dataset.val || '';
+                    accountInput.placeholder = '例: 旅費交通費';
+                    accountInput.style.minWidth = '120px';
+                    cellAccount.textContent = '';
+                    cellAccount.appendChild(accountInput);
 
                     // 税区分: マスタの消費税選択区分名から動的生成
                     var taxVal = cellTax.dataset.val || '';
@@ -556,23 +586,35 @@
                         if (m.taxCategory && taxOptions.indexOf(m.taxCategory) === -1) taxOptions.push(m.taxCategory);
                     });
                     if (taxVal && taxOptions.indexOf(taxVal) === -1) taxOptions.push(taxVal);
-                    var taxSelectHtml = `<select class="form-select form-select-sm" style="min-width:140px;">`;
-                    taxOptions.forEach(function(opt) {
-                        taxSelectHtml += `<option value="${opt}" ${opt === taxVal ? 'selected' : ''}>${opt || '-- 選択 --'}</option>`;
+                    var taxSelect = document.createElement('select');
+                    taxSelect.className = 'form-select form-select-sm';
+                    taxSelect.style.minWidth = '140px';
+                    taxOptions.forEach(function(optVal) {
+                        var opt = document.createElement('option');
+                        opt.value = optVal;
+                        opt.textContent = optVal || '-- 選択 --';
+                        if (optVal === taxVal) opt.selected = true;
+                        taxSelect.appendChild(opt);
                     });
-                    cellTax.innerHTML = taxSelectHtml + '</select>';
+                    cellTax.textContent = '';
+                    cellTax.appendChild(taxSelect);
 
-                    // 経費項目変更時に税区分・勘定科目をマスタから自動更新
-                    cellItem.querySelector('select').addEventListener('change', function() {
+                    // 経費項目変更時に税区分をマスタから自動更新
+                    itemSelect.addEventListener('change', function() {
                         var selectedCode = this.value;
                         var master = expenseMasterList.find(function(m) { return String(m.code) === String(selectedCode); });
                         if (master && master.taxCategory) {
-                            var taxSel = row.querySelector('.cell-tax select');
-                            if (taxSel) taxSel.value = master.taxCategory;
+                            taxSelect.value = master.taxCategory;
                         }
                     });
 
-                    cellRemarks.innerHTML = `<input type="text" class="form-control form-control-sm" value="${cellRemarks.dataset.val || ''}">`;
+                    // 備考
+                    var remarksInput = document.createElement('input');
+                    remarksInput.type = 'text';
+                    remarksInput.className = 'form-control form-control-sm';
+                    remarksInput.value = cellRemarks.dataset.val || '';
+                    cellRemarks.textContent = '';
+                    cellRemarks.appendChild(remarksInput);
                 } else {
                     row.classList.remove('editing-row');
                 }
@@ -616,6 +658,7 @@
                             showToast('エラー: ' + res.message, true);
                         }
                     })
+                    .withFailureHandler(function(e) { showLoading(false); showToast('保存エラー: ' + e.message, true); })
                     .updateDetailItems(currentKeiriId, updatesList, currentHeader['システム区分'], currentHeader['元申請ID']);
             });
         }
@@ -638,7 +681,8 @@
                     showLoading(false);
                     showToast(res.message, res.status === 'error');
                     if (res.status === 'success') removeItemsFromList(ids);
-                }).markAsProcessed(ids, USER_NAME);
+                }).withFailureHandler(e => { showLoading(false); showToast('処理エラー: ' + e.message, true); })
+                .markAsProcessed(ids, USER_NAME);
             });
         }
 
@@ -666,7 +710,8 @@
                     if (document.getElementById('reportDetailModal').classList.contains('show')) detailModal.hide();
                     removeItemsFromList(currentKeiriId);
                 }
-            }).markAsRejected(currentKeiriId, reason);
+            }).withFailureHandler(e => { showLoading(false); showToast('差戻しエラー: ' + e.message, true); })
+            .markAsRejected(currentKeiriId, reason);
         }
 
         function handleProcess(id) {
@@ -677,7 +722,8 @@
                     showLoading(false);
                     showToast(res.message, res.status === 'error');
                     if (res.status === 'success') removeItemsFromList(id);
-                }).markAsProcessed(id, USER_NAME);
+                }).withFailureHandler(e => { showLoading(false); showToast('処理エラー: ' + e.message, true); })
+                .markAsProcessed(id, USER_NAME);
             });
         }
 
@@ -708,7 +754,7 @@
         function toggleAll(chk) { document.querySelectorAll('.pending-checkbox').forEach(c => c.checked = chk); }
         function escapeHtml(str) {
             if (!str) return '';
-            return str.toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            return str.toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
     </script>
 </body>
