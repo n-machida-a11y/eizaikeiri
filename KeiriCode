@@ -508,11 +508,14 @@ function getReportDetails_(reportId, ss, names, idColName) {
       header['承認者名'] = approverList.length > 0 ? approverList.join(' / ') : '';
   }
 
-  // 元システムの列名揺れを正規化 (領収書URL・備考・カード利用額)
+  // 元システムの列名揺れを正規化 (日報: カード金額/税抜き金額/税率 等)
   expenses.forEach(function(ex) {
+    ex['明細ID'] = ex['明細ID'] || ex['経費ID'] || ex['経費明細ID'] || '';
+    ex['カード利用額'] = ex['カード利用額'] || ex['カード金額'] || ex['カード'] || 0;
+    ex['税抜金額'] = ex['税抜金額'] || ex['税抜き金額'] || '';
+    ex['消費税率'] = ex['消費税率'] || ex['税率'] || '';
     ex['領収書URL'] = ex['領収書URL'] || ex['画像URL'] || ex['添付URL'] || ex['レシートURL'] || '';
     ex['備考'] = ex['備考'] || ex['メモ'] || ex['コメント'] || '';
-    ex['カード利用額'] = ex['カード利用額'] || ex['カード'] || 0;
     ex['エリアコード'] = ex['エリアコード'] || ex['地域区分コード'] || ex['宿泊エリアコード'] || '';
   });
 
